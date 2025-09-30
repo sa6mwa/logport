@@ -205,3 +205,73 @@ func TestZerologAdapterSupportsSlogHandler(t *testing.T) {
 		t.Fatalf("expected grouped attr outer.code=7, got %v", record["outer.code"])
 	}
 }
+
+func TestNoLevelOmitsLevelField(t *testing.T) {
+	buf := &bytes.Buffer{}
+	base := zerolog.New(buf)
+	logger := NewFromLogger(base).LogLevel(port.NoLevel)
+	logger.Info("no level", "foo", "bar")
+
+	record := decodeZerologJSON(t, buf.Bytes())
+	if record["message"] != "no level" {
+		t.Fatalf("expected message 'no level', got %v", record["message"])
+	}
+	if _, ok := record["level"]; ok {
+		t.Fatalf("expected level field to be absent, got %v", record["level"])
+	}
+	if record["foo"] != "bar" {
+		t.Fatalf("expected foo=bar, got %v", record["foo"])
+	}
+
+	buf.Reset()
+	logger.With("tenant", "acme").Warn("still no level")
+	record = decodeZerologJSON(t, buf.Bytes())
+	if _, ok := record["level"]; ok {
+		t.Fatalf("expected no level in chained logger output, got %v", record["level"])
+	}
+	if record["tenant"] != "acme" {
+		t.Fatalf("expected tenant field, got %v", record["tenant"])
+	}
+
+	buf.Reset()
+	slogHandler, ok := logger.(slog.Handler)
+	if !ok {
+		t.Fatalf("expected adapter to implement slog.Handler")
+	}
+	slog.New(slogHandler).Info("handled via slog", slog.String("status", "ok"))
+	record = decodeZerologJSON(t, buf.Bytes())
+	if _, ok := record["level"]; ok {
+		t.Fatalf("expected slog handler to omit level, got %v", record["level"])
+	}
+	if record["status"] != "ok" {
+		t.Fatalf("expected status field, got %v", record["status"])
+	}
+}
+
+func TestNoLevelConsoleWriterShowsPlaceholder(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := New(buf).LogLevel(port.NoLevel)
+	logger.Warn("console no level", "foo", "bar")
+
+	out := buf.String()
+	if out == "" {
+		t.Fatalf("expected console output, got empty string")
+	}
+	if !strings.Contains(out, "???") {
+		t.Fatalf("expected console writer placeholder '???', got %q", out)
+	}
+	if !strings.Contains(out, "console no level") {
+		t.Fatalf("expected message to appear, got %q", out)
+	}
+}
+
+func decodeZerologJSON(t *testing.T, data []byte) map[string]any {
+	if len(data) == 0 {
+		t.Fatalf("expected log output, got empty data")
+	}
+	var record map[string]any
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatalf("failed to decode zerolog output: %v", err)
+	}
+	return record
+}

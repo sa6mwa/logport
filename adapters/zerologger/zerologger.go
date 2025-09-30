@@ -13,8 +13,9 @@ import (
 )
 
 type adapter struct {
-	logger zerolog.Logger
-	groups []string
+	logger      zerolog.Logger
+	groups      []string
+	forcedLevel *port.Level
 }
 
 // Options controls how the zerolog adapter formats log output.
@@ -88,35 +89,61 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	if fields := fieldsFromKeyvals(keyvals); len(fields) > 0 {
 		ctx = ctx.Fields(fields)
 	}
-	return adapter{logger: ctx.Logger(), groups: a.groups}
+	return adapter{logger: ctx.Logger(), groups: a.groups, forcedLevel: a.forcedLevel}
+}
+
+func (a adapter) LogLevel(level port.Level) port.ForLogging {
+	if level == port.NoLevel {
+		lvl := level
+		return adapter{logger: a.logger, groups: a.groups, forcedLevel: &lvl}
+	}
+	return adapter{logger: a.logger.Level(portLevelToZero(level)), groups: a.groups}
 }
 
 func (a adapter) Debug(msg string, keyvals ...any) {
-	event := a.logger.Debug()
+	event := a.newEvent(zerolog.DebugLevel)
 	addFields(event, keyvals)
 	event.Msg(msg)
 }
 
 func (a adapter) Info(msg string, keyvals ...any) {
-	event := a.logger.Info()
+	event := a.newEvent(zerolog.InfoLevel)
 	addFields(event, keyvals)
 	event.Msg(msg)
 }
 
 func (a adapter) Warn(msg string, keyvals ...any) {
-	event := a.logger.Warn()
+	event := a.newEvent(zerolog.WarnLevel)
 	addFields(event, keyvals)
 	event.Msg(msg)
 }
 
 func (a adapter) Error(msg string, keyvals ...any) {
-	event := a.logger.Error()
+	event := a.newEvent(zerolog.ErrorLevel)
 	addFields(event, keyvals)
 	event.Msg(msg)
 }
 
 func (a adapter) Fatal(msg string, keyvals ...any) {
 	event := a.logger.Fatal()
+	addFields(event, keyvals)
+	event.Msg(msg)
+}
+
+func (a adapter) Panic(msg string, keyvals ...any) {
+	event := a.logger.Panic()
+	if event == nil {
+		panic(msg)
+	}
+	addFields(event, keyvals)
+	event.Msg(msg)
+}
+
+func (a adapter) Trace(msg string, keyvals ...any) {
+	event := a.newEvent(zerolog.TraceLevel)
+	if event == nil {
+		return
+	}
 	addFields(event, keyvals)
 	event.Msg(msg)
 }
@@ -195,11 +222,19 @@ func addFields(event *zerolog.Event, keyvals []any) {
 var _ port.ForLogging = adapter{}
 
 func (a adapter) Enabled(_ context.Context, level slog.Level) bool {
+	if a.forceNoLevel() {
+		return true
+	}
 	return slogLevelToZero(level) >= a.logger.GetLevel()
 }
 
 func (a adapter) Handle(_ context.Context, record slog.Record) error {
-	event := a.logger.WithLevel(slogLevelToZero(record.Level))
+	var event *zerolog.Event
+	if a.forceNoLevel() {
+		event = a.logger.Log()
+	} else {
+		event = a.logger.WithLevel(slogLevelToZero(record.Level))
+	}
 	keyvals := recordToKeyvals(record, a.groups)
 	addFields(event, keyvals)
 	event.Msg(record.Message)
@@ -214,18 +249,20 @@ func (a adapter) WithAttrs(attrs []slog.Attr) slog.Handler {
 	if fields := fieldsFromKeyvals(attrsToKeyvals(attrs, a.groups)); len(fields) > 0 {
 		ctx = ctx.Fields(fields)
 	}
-	return adapter{logger: ctx.Logger(), groups: a.groups}
+	return adapter{logger: ctx.Logger(), groups: a.groups, forcedLevel: a.forcedLevel}
 }
 
 func (a adapter) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return a
 	}
-	return adapter{logger: a.logger, groups: appendGroup(a.groups, name)}
+	return adapter{logger: a.logger, groups: appendGroup(a.groups, name), forcedLevel: a.forcedLevel}
 }
 
 func slogLevelToZero(level slog.Level) zerolog.Level {
 	switch {
+	case level < slog.LevelDebug:
+		return zerolog.TraceLevel
 	case level <= slog.LevelDebug:
 		return zerolog.DebugLevel
 	case level <= slog.LevelInfo:
@@ -294,4 +331,53 @@ func joinAttrKey(groups []string, key string) string {
 		parts = append(parts, key)
 	}
 	return strings.Join(parts, ".")
+}
+
+func portLevelToZero(level port.Level) zerolog.Level {
+	switch level {
+	case port.TraceLevel:
+		return zerolog.TraceLevel
+	case port.NoLevel:
+		return zerolog.NoLevel
+	case port.DebugLevel:
+		return zerolog.DebugLevel
+	case port.InfoLevel:
+		return zerolog.InfoLevel
+	case port.WarnLevel:
+		return zerolog.WarnLevel
+	case port.ErrorLevel:
+		return zerolog.ErrorLevel
+	case port.FatalLevel:
+		return zerolog.FatalLevel
+	case port.PanicLevel:
+		return zerolog.PanicLevel
+	case port.Disabled:
+		return zerolog.Disabled
+	default:
+		return zerolog.InfoLevel
+	}
+}
+
+func (a adapter) newEvent(level zerolog.Level) *zerolog.Event {
+	if a.forceNoLevel() {
+		return a.logger.Log()
+	}
+	switch level {
+	case zerolog.TraceLevel:
+		return a.logger.Trace()
+	case zerolog.DebugLevel:
+		return a.logger.Debug()
+	case zerolog.InfoLevel:
+		return a.logger.Info()
+	case zerolog.WarnLevel:
+		return a.logger.Warn()
+	case zerolog.ErrorLevel:
+		return a.logger.Error()
+	default:
+		return a.logger.Log()
+	}
+}
+
+func (a adapter) forceNoLevel() bool {
+	return a.forcedLevel != nil && *a.forcedLevel == port.NoLevel
 }
