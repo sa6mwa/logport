@@ -43,6 +43,20 @@ type adapter struct {
 	logger      *plog.Logger
 	baseKeyvals []any
 	groups      []string
+	forcedLevel *port.Level
+}
+
+func (a adapter) LogLevel(level port.Level) port.ForLogging {
+	if a.logger == nil {
+		return a
+	}
+	if level == port.NoLevel {
+		lvl := level
+		return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: a.groups, forcedLevel: &lvl}
+	}
+	clone := *a.logger
+	clone.Level = portLevelToPhuslu(level)
+	return adapter{logger: &clone, baseKeyvals: a.baseKeyvals, groups: a.groups}
 }
 
 func (a adapter) With(keyvals ...any) port.ForLogging {
@@ -59,35 +73,55 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	base := make([]any, 0, len(a.baseKeyvals)+len(addition))
 	base = append(base, a.baseKeyvals...)
 	base = append(base, addition...)
-	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups}
+	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups, forcedLevel: a.forcedLevel}
 }
 
 func (a adapter) Debug(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
 	}
-	a.logEntry(a.logger.Debug(), msg, keyvals)
+	a.emit(msg, keyvals, func() *plog.Entry {
+		if a.forceNoLevel() {
+			return a.logger.Log()
+		}
+		return a.logger.Debug()
+	})
 }
 
 func (a adapter) Info(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
 	}
-	a.logEntry(a.logger.Info(), msg, keyvals)
+	a.emit(msg, keyvals, func() *plog.Entry {
+		if a.forceNoLevel() {
+			return a.logger.Log()
+		}
+		return a.logger.Info()
+	})
 }
 
 func (a adapter) Warn(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
 	}
-	a.logEntry(a.logger.Warn(), msg, keyvals)
+	a.emit(msg, keyvals, func() *plog.Entry {
+		if a.forceNoLevel() {
+			return a.logger.Log()
+		}
+		return a.logger.Warn()
+	})
 }
 
 func (a adapter) Error(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
 	}
-	a.logEntry(a.logger.Error(), msg, keyvals)
+	a.emit(msg, keyvals, func() *plog.Entry {
+		if a.forceNoLevel() {
+			return a.logger.Log()
+		}
+		return a.logger.Error()
+	})
 }
 
 func (a adapter) Fatal(msg string, keyvals ...any) {
@@ -95,6 +129,29 @@ func (a adapter) Fatal(msg string, keyvals ...any) {
 		return
 	}
 	a.logEntry(a.logger.Fatal(), msg, keyvals)
+}
+
+func (a adapter) Panic(msg string, keyvals ...any) {
+	if a.logger == nil {
+		panic(msg)
+	}
+	entry := a.logger.Panic()
+	if entry == nil {
+		panic(msg)
+	}
+	a.logEntry(entry, msg, keyvals)
+}
+
+func (a adapter) Trace(msg string, keyvals ...any) {
+	if a.logger == nil {
+		return
+	}
+	a.emit(msg, keyvals, func() *plog.Entry {
+		if a.forceNoLevel() {
+			return a.logger.Log()
+		}
+		return a.logger.Trace()
+	})
 }
 
 func (a adapter) logEntry(entry *plog.Entry, msg string, keyvals []any) {
@@ -119,11 +176,28 @@ func (a adapter) Enabled(_ context.Context, level slog.Level) bool {
 	}
 	current := plog.Level(atomic.LoadUint32((*uint32)(&a.logger.Level)))
 	target := slogLevelToPhuslu(level)
+	if a.forceNoLevel() {
+		return true
+	}
 	return target >= current
 }
 
 func (a adapter) Handle(_ context.Context, record slog.Record) error {
 	if a.logger == nil {
+		return nil
+	}
+	if a.forceNoLevel() {
+		entry := a.logger.Log()
+		if entry == nil {
+			return nil
+		}
+		if len(a.baseKeyvals) > 0 {
+			entry.KeysAndValues(a.baseKeyvals...)
+		}
+		if kvs := recordToKeyvals(record, a.groups); len(kvs) > 0 {
+			entry.KeysAndValues(kvs...)
+		}
+		entry.Msg(record.Message)
 		return nil
 	}
 	entry := a.logger.WithLevel(slogLevelToPhuslu(record.Level))
@@ -151,7 +225,7 @@ func (a adapter) WithAttrs(attrs []slog.Attr) slog.Handler {
 	base := make([]any, 0, len(a.baseKeyvals)+len(addition))
 	base = append(base, a.baseKeyvals...)
 	base = append(base, addition...)
-	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups}
+	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups, forcedLevel: a.forcedLevel}
 }
 
 func (a adapter) WithGroup(name string) slog.Handler {
@@ -159,7 +233,7 @@ func (a adapter) WithGroup(name string) slog.Handler {
 		return a
 	}
 	groups := appendGroup(a.groups, name)
-	return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: groups}
+	return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: groups, forcedLevel: a.forcedLevel}
 }
 
 func slogLevelToPhuslu(level slog.Level) plog.Level {
@@ -259,3 +333,35 @@ func joinAttrKey(groups []string, key string) string {
 }
 
 var _ port.ForLogging = adapter{}
+
+func portLevelToPhuslu(level port.Level) plog.Level {
+	switch level {
+	case port.TraceLevel, port.NoLevel:
+		return plog.TraceLevel
+	case port.DebugLevel:
+		return plog.DebugLevel
+	case port.InfoLevel:
+		return plog.InfoLevel
+	case port.WarnLevel:
+		return plog.WarnLevel
+	case port.ErrorLevel:
+		return plog.ErrorLevel
+	case port.FatalLevel:
+		return plog.FatalLevel
+	case port.PanicLevel:
+		return plog.PanicLevel
+	case port.Disabled:
+		return plog.PanicLevel + 1
+	default:
+		return plog.InfoLevel
+	}
+}
+
+func (a adapter) emit(msg string, keyvals []any, entryFactory func() *plog.Entry) {
+	entry := entryFactory()
+	a.logEntry(entry, msg, keyvals)
+}
+
+func (a adapter) forceNoLevel() bool {
+	return a.logger != nil && a.forcedLevel != nil && *a.forcedLevel == port.NoLevel
+}

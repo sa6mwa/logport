@@ -90,6 +90,33 @@ func TestEnabledRespectsLoggerLevel(t *testing.T) {
 	}
 }
 
+func TestNoLevelOmitsLevelField(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := New(buf).LogLevel(port.NoLevel)
+	logger.Info("no level", "foo", "bar")
+
+	record := decodeLogLine(t, buf.Bytes())
+	if record["message"] != "no level" {
+		t.Fatalf("expected message 'no level', got %v", record["message"])
+	}
+	if _, ok := record["level"]; ok {
+		t.Fatalf("expected no level field, got %v", record["level"])
+	}
+	if record["foo"] != "bar" {
+		t.Fatalf("expected foo=bar, got %v", record["foo"])
+	}
+
+	buf.Reset()
+	logger.With("tenant", "acme").Warn("still no level")
+	record = decodeLogLine(t, buf.Bytes())
+	if _, ok := record["level"]; ok {
+		t.Fatalf("expected no level field after With, got %v", record["level"])
+	}
+	if record["tenant"] != "acme" {
+		t.Fatalf("expected tenant field to persist, got %v", record["tenant"])
+	}
+}
+
 func decodeLogLine(t *testing.T, data []byte) map[string]any {
 	t.Helper()
 	dec := json.NewDecoder(bytes.NewReader(bytes.TrimSpace(data)))

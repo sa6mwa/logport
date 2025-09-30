@@ -23,18 +23,45 @@ package logport
 import (
 	"context"
 	"log/slog"
+	"os"
+)
+
+// Level defines log levels.
+type Level int8
+
+const (
+	// DebugLevel defines debug log level.
+	DebugLevel Level = iota
+	// InfoLevel defines info log level.
+	InfoLevel
+	// WarnLevel defines warn log level.
+	WarnLevel
+	// ErrorLevel defines error log level.
+	ErrorLevel
+	// FatalLevel defines fatal log level.
+	FatalLevel
+	// PanicLevel defines panic log level.
+	PanicLevel
+	// NoLevel defines an absent log level.
+	NoLevel
+	// Disabled disables the logger.
+	Disabled
+	TraceLevel Level = -1
 )
 
 // ForLogging mirrors the capabilities of structured loggers such as
 // charmbracelet/log.
 type ForLogging interface {
 	slog.Handler
+	LogLevel(Level) ForLogging
 	With(keyvals ...any) ForLogging
 	Debug(msg string, keyvals ...any)
 	Info(msg string, keyvals ...any)
 	Warn(msg string, keyvals ...any)
 	Error(msg string, keyvals ...any)
 	Fatal(msg string, keyvals ...any)
+	Panic(msg string, keyvals ...any)
+	Trace(msg string, keyvals ...any)
 }
 
 var DTGTimeFormat string = "021504"
@@ -69,12 +96,15 @@ func NoopLogger() ForLogging {
 
 type noopLogger struct{}
 
+func (noopLogger) LogLevel(Level) ForLogging        { return noopLogger{} }
 func (noopLogger) With(keyvals ...any) ForLogging   { return noopLogger{} }
 func (noopLogger) Debug(msg string, keyvals ...any) {}
 func (noopLogger) Info(msg string, keyvals ...any)  {}
 func (noopLogger) Warn(msg string, keyvals ...any)  {}
 func (noopLogger) Error(msg string, keyvals ...any) {}
-func (noopLogger) Fatal(msg string, keyvals ...any) {}
+func (noopLogger) Fatal(msg string, keyvals ...any) { os.Exit(1) }
+func (noopLogger) Panic(msg string, keyvals ...any) { panic(msg) }
+func (noopLogger) Trace(msg string, keyvals ...any) {}
 
 func (noopLogger) Enabled(context.Context, slog.Level) bool  { return false }
 func (noopLogger) Handle(context.Context, slog.Record) error { return nil }
