@@ -7,7 +7,8 @@ remaining free to swap concrete loggers.
 ## Highlights
 
 - Uniform interface with structured logging support via `With`, `WithGroup`, and
-  full `slog.Handler` compliance.
+  full `slog.Handler` compliance (including direct acceptance of `slog.Attr`
+  arguments like `logger.Info("msg", slog.String("key", "value"))`).
 - Level-aware helpers: `Trace`, `Debug`, `Info`, `Warn`, `Error`, `Fatal`, and
   `Panic` plus chaining through `LogLevel` to create derived loggers.
 - New log levels include:

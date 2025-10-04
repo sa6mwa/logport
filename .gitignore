@@ -1,4 +1,5 @@
 /.gocache
+coverage.out
 bin/
 \#*\#
 .vscode/

@@ -261,15 +261,32 @@ func keyvalsToFields(groups []string, keyvals []any) []zap.Field {
 		return nil
 	}
 	fields := make([]zap.Field, 0, len(keyvals)/2+len(keyvals)%2)
-	pairs := len(keyvals) / 2
-	for i := range pairs {
-		key := fmt.Sprint(keyvals[2*i])
-		val := keyvals[2*i+1]
-		fields = append(fields, zap.Any(joinKey(groups, key), val))
-	}
-	if len(keyvals)%2 != 0 {
-		key := fmt.Sprintf("arg%d", pairs)
-		fields = append(fields, zap.Any(joinKey(groups, key), keyvals[len(keyvals)-1]))
+	pairIndex := 0
+	for i := 0; i < len(keyvals); {
+		switch v := keyvals[i].(type) {
+		case slog.Attr:
+			fields = appendAttrField(fields, v, groups)
+			i++
+		case []slog.Attr:
+			for _, attr := range v {
+				fields = appendAttrField(fields, attr, groups)
+			}
+			i++
+			continue
+		default:
+			if i+1 < len(keyvals) {
+				key := fmt.Sprint(v)
+				fields = append(fields, zap.Any(joinKey(groups, key), keyvals[i+1]))
+				pairIndex++
+				i += 2
+			} else {
+				key := fmt.Sprintf("arg%d", pairIndex)
+				fields = append(fields, zap.Any(joinKey(groups, key), v))
+				pairIndex++
+				i++
+			}
+			continue
+		}
 	}
 	return fields
 }

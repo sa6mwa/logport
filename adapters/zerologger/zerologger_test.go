@@ -21,7 +21,7 @@ func (c customStringer) String() string { return c.value }
 func TestFieldsFromKeyvals(t *testing.T) {
 	keyvals := []any{"foo", "bar", 99, "answer"}
 
-	fields := fieldsFromKeyvals(keyvals)
+	fields := fieldsFromKeyvals(keyvals, nil)
 
 	if fields["foo"] != "bar" {
 		t.Fatalf("expected foo=bar, got %v", fields["foo"])
@@ -37,13 +37,27 @@ func TestFieldsFromKeyvals(t *testing.T) {
 func TestFieldsFromKeyvalsOddCount(t *testing.T) {
 	keyvals := []any{"foo", "bar", "trailing"}
 
-	fields := fieldsFromKeyvals(keyvals)
+	fields := fieldsFromKeyvals(keyvals, nil)
 
 	if fields["foo"] != "bar" {
 		t.Fatalf("expected foo=bar, got %v", fields["foo"])
 	}
 	if fields["arg1"] != "trailing" {
 		t.Fatalf("expected trailing value under arg1, got %v", fields["arg1"])
+	}
+}
+
+func TestInfoSupportsSlogAttrArgs(t *testing.T) {
+	buf := &bytes.Buffer{}
+	adapter := NewFromLogger(zerolog.New(buf))
+	adapter.Info("greeting", slog.String("subject", "world"))
+
+	record := decodeZerologJSON(t, buf.Bytes())
+	if record["message"] != "greeting" {
+		t.Fatalf("expected message 'greeting', got %v", record["message"])
+	}
+	if record["subject"] != "world" {
+		t.Fatalf("expected subject from slog.Attr, got %v", record["subject"])
 	}
 }
 
@@ -77,7 +91,7 @@ func TestAddFieldsCoversSupportedTypes(t *testing.T) {
 		"time", now,
 		"duration", time.Second,
 		"bytes", data,
-	})
+	}, nil)
 	event.Msg("done")
 
 	var record map[string]any

@@ -3,6 +3,7 @@ package charmlogger
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -54,47 +55,64 @@ func (c charmAdapter) LogLevel(level port.Level) port.ForLogging {
 }
 
 func (c charmAdapter) With(keyvals ...any) port.ForLogging {
-	return charmAdapter{logger: c.logger.With(keyvals...), groups: c.groups, forcedLevel: c.forcedLevel}
+	if c.logger == nil || len(keyvals) == 0 {
+		return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: c.forcedLevel}
+	}
+	normalized := normalizeCharmKeyvals(keyvals, nil)
+	if len(normalized) == 0 {
+		return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: c.forcedLevel}
+	}
+	return charmAdapter{logger: c.logger.With(normalized...), groups: c.groups, forcedLevel: c.forcedLevel}
 }
 
 func (c charmAdapter) Debug(msg string, keyvals ...any) {
 	if c.forceNoLevel() {
+		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Print(msg, keyvals...)
 		return
 	}
+	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Debug(msg, keyvals...)
 }
 
 func (c charmAdapter) Info(msg string, keyvals ...any) {
 	if c.forceNoLevel() {
+		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Print(msg, keyvals...)
 		return
 	}
+	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Info(msg, keyvals...)
 }
 
 func (c charmAdapter) Warn(msg string, keyvals ...any) {
 	if c.forceNoLevel() {
+		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Print(msg, keyvals...)
 		return
 	}
+	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Warn(msg, keyvals...)
 }
 
 func (c charmAdapter) Error(msg string, keyvals ...any) {
 	if c.forceNoLevel() {
+		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Print(msg, keyvals...)
 		return
 	}
+	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Error(msg, keyvals...)
 }
 
 func (c charmAdapter) Fatal(msg string, keyvals ...any) {
+	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Fatal(msg, keyvals...)
 }
 
 func (c charmAdapter) Panic(msg string, keyvals ...any) {
 	if c.logger != nil {
+		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Error(msg, keyvals...)
 	}
 	panic(msg)
@@ -105,9 +123,11 @@ func (c charmAdapter) Trace(msg string, keyvals ...any) {
 		return
 	}
 	if c.forceNoLevel() {
+		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Print(msg, keyvals...)
 		return
 	}
+	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Debug(msg, keyvals...)
 }
 
@@ -259,3 +279,44 @@ func (c charmAdapter) forceNoLevel() bool {
 }
 
 var _ port.ForLogging = charmAdapter{}
+
+func normalizeCharmKeyvals(keyvals []any, groups []string) []any {
+	if len(keyvals) == 0 {
+		return nil
+	}
+	normalized := make([]any, 0, len(keyvals)+len(keyvals)%2)
+	pairIndex := 0
+	for i := 0; i < len(keyvals); {
+		switch v := keyvals[i].(type) {
+		case slog.Attr:
+			normalized = appendAttrKeyvals(normalized, v, groups)
+			i++
+		case []slog.Attr:
+			for _, attr := range v {
+				normalized = appendAttrKeyvals(normalized, attr, groups)
+			}
+			i++
+			continue
+		default:
+			if i+1 < len(keyvals) {
+				key := fmt.Sprint(v)
+				if len(groups) > 0 {
+					key = joinAttrKey(groups, key)
+				}
+				normalized = append(normalized, key, keyvals[i+1])
+				pairIndex++
+				i += 2
+			} else {
+				key := fmt.Sprintf("arg%d", pairIndex)
+				if len(groups) > 0 {
+					key = joinAttrKey(groups, key)
+				}
+				normalized = append(normalized, key, v)
+				pairIndex++
+				i++
+			}
+			continue
+		}
+	}
+	return normalized
+}

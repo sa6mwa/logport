@@ -29,6 +29,18 @@ func TestNewLogsMessageWithFields(t *testing.T) {
 	}
 }
 
+func TestInfoSupportsSlogAttrArgs(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := New(buf)
+
+	logger.Info("attr", slog.String("subject", "world"))
+
+	got := buf.String()
+	if !strings.Contains(got, "subject=world") {
+		t.Fatalf("expected slog attr field, got %q", got)
+	}
+}
+
 func TestWithAddsPersistentFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := New(buf)

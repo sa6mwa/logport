@@ -66,7 +66,7 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	if a.logger == nil {
 		return a
 	}
-	addition := normalizeKeyvals(keyvals)
+	addition := normalizeKeyvals(keyvals, nil)
 	if len(addition) == 0 {
 		return a
 	}
@@ -162,7 +162,7 @@ func (a adapter) logEntry(entry *plog.Entry, msg string, keyvals []any) {
 		entry.KeysAndValues(a.baseKeyvals...)
 	}
 	if len(keyvals) > 0 {
-		addition := normalizeKeyvals(keyvals)
+		addition := normalizeKeyvals(keyvals, a.groups)
 		if len(addition) > 0 {
 			entry.KeysAndValues(addition...)
 		}
@@ -253,18 +253,43 @@ func slogLevelToPhuslu(level slog.Level) plog.Level {
 	}
 }
 
-func normalizeKeyvals(keyvals []any) []any {
+func normalizeKeyvals(keyvals []any, groups []string) []any {
 	if len(keyvals) == 0 {
 		return nil
 	}
-	pairs := len(keyvals) / 2
 	normalized := make([]any, 0, len(keyvals)+len(keyvals)%2)
-	for i := range pairs {
-		key := fmt.Sprint(keyvals[2*i])
-		normalized = append(normalized, key, keyvals[2*i+1])
-	}
-	if len(keyvals)%2 != 0 {
-		normalized = append(normalized, fmt.Sprintf("arg%d", pairs), keyvals[len(keyvals)-1])
+	pairIndex := 0
+	for i := 0; i < len(keyvals); {
+		switch v := keyvals[i].(type) {
+		case slog.Attr:
+			normalized = appendAttrKeyvals(normalized, v, groups)
+			i++
+		case []slog.Attr:
+			for _, attr := range v {
+				normalized = appendAttrKeyvals(normalized, attr, groups)
+			}
+			i++
+			continue
+		default:
+			if i+1 < len(keyvals) {
+				key := fmt.Sprint(v)
+				if len(groups) > 0 {
+					key = joinAttrKey(groups, key)
+				}
+				normalized = append(normalized, key, keyvals[i+1])
+				pairIndex++
+				i += 2
+			} else {
+				key := fmt.Sprintf("arg%d", pairIndex)
+				if len(groups) > 0 {
+					key = joinAttrKey(groups, key)
+				}
+				normalized = append(normalized, key, v)
+				pairIndex++
+				i++
+			}
+			continue
+		}
 	}
 	return normalized
 }

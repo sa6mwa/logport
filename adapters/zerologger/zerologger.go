@@ -86,7 +86,7 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 		return a
 	}
 	ctx := a.logger.With()
-	if fields := fieldsFromKeyvals(keyvals); len(fields) > 0 {
+	if fields := fieldsFromKeyvals(keyvals, nil); len(fields) > 0 {
 		ctx = ctx.Fields(fields)
 	}
 	return adapter{logger: ctx.Logger(), groups: a.groups, forcedLevel: a.forcedLevel}
@@ -102,31 +102,31 @@ func (a adapter) LogLevel(level port.Level) port.ForLogging {
 
 func (a adapter) Debug(msg string, keyvals ...any) {
 	event := a.newEvent(zerolog.DebugLevel)
-	addFields(event, keyvals)
+	addFields(event, keyvals, a.groups)
 	event.Msg(msg)
 }
 
 func (a adapter) Info(msg string, keyvals ...any) {
 	event := a.newEvent(zerolog.InfoLevel)
-	addFields(event, keyvals)
+	addFields(event, keyvals, a.groups)
 	event.Msg(msg)
 }
 
 func (a adapter) Warn(msg string, keyvals ...any) {
 	event := a.newEvent(zerolog.WarnLevel)
-	addFields(event, keyvals)
+	addFields(event, keyvals, a.groups)
 	event.Msg(msg)
 }
 
 func (a adapter) Error(msg string, keyvals ...any) {
 	event := a.newEvent(zerolog.ErrorLevel)
-	addFields(event, keyvals)
+	addFields(event, keyvals, a.groups)
 	event.Msg(msg)
 }
 
 func (a adapter) Fatal(msg string, keyvals ...any) {
 	event := a.logger.Fatal()
-	addFields(event, keyvals)
+	addFields(event, keyvals, a.groups)
 	event.Msg(msg)
 }
 
@@ -135,7 +135,7 @@ func (a adapter) Panic(msg string, keyvals ...any) {
 	if event == nil {
 		panic(msg)
 	}
-	addFields(event, keyvals)
+	addFields(event, keyvals, a.groups)
 	event.Msg(msg)
 }
 
@@ -144,31 +144,67 @@ func (a adapter) Trace(msg string, keyvals ...any) {
 	if event == nil {
 		return
 	}
-	addFields(event, keyvals)
+	addFields(event, keyvals, a.groups)
 	event.Msg(msg)
 }
 
-func fieldsFromKeyvals(keyvals []any) map[string]any {
+func fieldsFromKeyvals(keyvals []any, groups []string) map[string]any {
 	if len(keyvals) == 0 {
 		return nil
 	}
 	fields := make(map[string]any, len(keyvals)/2+len(keyvals)%2)
-	pairs := len(keyvals) / 2
-	for i := range pairs {
-		key := fmt.Sprint(keyvals[2*i])
-		fields[key] = keyvals[2*i+1]
-	}
-	if len(keyvals)%2 != 0 {
-		fields[fmt.Sprintf("arg%d", pairs)] = keyvals[len(keyvals)-1]
+	scratch := make([]any, 0, 4)
+	pairIndex := 0
+	for i := 0; i < len(keyvals); {
+		switch v := keyvals[i].(type) {
+		case slog.Attr:
+			scratch = scratch[:0]
+			scratch = appendAttrKeyvals(scratch, v, groups)
+			for j := 0; j < len(scratch); j += 2 {
+				key := fmt.Sprint(scratch[j])
+				fields[key] = scratch[j+1]
+			}
+			i++
+		case []slog.Attr:
+			for _, attr := range v {
+				scratch = scratch[:0]
+				scratch = appendAttrKeyvals(scratch, attr, groups)
+				for j := 0; j < len(scratch); j += 2 {
+					key := fmt.Sprint(scratch[j])
+					fields[key] = scratch[j+1]
+				}
+			}
+			i++
+			continue
+		default:
+			if i+1 < len(keyvals) {
+				key := fmt.Sprint(v)
+				if len(groups) > 0 {
+					key = joinAttrKey(groups, key)
+				}
+				fields[key] = keyvals[i+1]
+				pairIndex++
+				i += 2
+			} else {
+				key := fmt.Sprintf("arg%d", pairIndex)
+				if len(groups) > 0 {
+					key = joinAttrKey(groups, key)
+				}
+				fields[key] = v
+				pairIndex++
+				i++
+			}
+			continue
+		}
 	}
 	return fields
 }
 
-func addFields(event *zerolog.Event, keyvals []any) {
+func addFields(event *zerolog.Event, keyvals []any, groups []string) {
 	if event == nil || len(keyvals) == 0 {
 		return
 	}
-	fields := fieldsFromKeyvals(keyvals)
+	fields := fieldsFromKeyvals(keyvals, groups)
 	for key, value := range fields {
 		switch v := value.(type) {
 		case error:
@@ -236,7 +272,7 @@ func (a adapter) Handle(_ context.Context, record slog.Record) error {
 		event = a.logger.WithLevel(slogLevelToZero(record.Level))
 	}
 	keyvals := recordToKeyvals(record, a.groups)
-	addFields(event, keyvals)
+	addFields(event, keyvals, nil)
 	event.Msg(record.Message)
 	return nil
 }
@@ -246,7 +282,7 @@ func (a adapter) WithAttrs(attrs []slog.Attr) slog.Handler {
 		return a
 	}
 	ctx := a.logger.With()
-	if fields := fieldsFromKeyvals(attrsToKeyvals(attrs, a.groups)); len(fields) > 0 {
+	if fields := fieldsFromKeyvals(attrsToKeyvals(attrs, a.groups), nil); len(fields) > 0 {
 		ctx = ctx.Fields(fields)
 	}
 	return adapter{logger: ctx.Logger(), groups: a.groups, forcedLevel: a.forcedLevel}
