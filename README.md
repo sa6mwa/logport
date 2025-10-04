@@ -1,14 +1,17 @@
 # logport
 
-`logport` defines a small logging port in Go and provides adapters for popular
-logging back ends so that applications can depend on a single interface while
-remaining free to swap concrete loggers.
+`logport` defines a flexible logging port in Go and provides adapters for
+popular logging back ends so that applications can depend on a single
+capability-rich interface while remaining free to swap concrete loggers.
 
 ## Highlights
 
 - Uniform interface with structured logging support via `With`, `WithGroup`, and
   full `slog.Handler` compliance (including direct acceptance of `slog.Attr`
   arguments like `logger.Info("msg", slog.String("key", "value"))`).
+- Convenience `*f` helpers (`Debugf`, `Infof`, etc.) when you want printf-style
+  messages—handy for quick logs, though key/value logging remains the
+  allocation-free option for hot paths.
 - Level-aware helpers: `Trace`, `Debug`, `Info`, `Warn`, `Error`, `Fatal`, and
   `Panic` plus chaining through `LogLevel` to create derived loggers.
 - New log levels include:

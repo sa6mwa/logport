@@ -1,6 +1,7 @@
 // logport defines a minimal logging port that can be satisfied by multiple back
 // ends. The core ForLogging interface embeds slog.Handler so that adapters can
-// be used both as structured logging receivers and as drop-in slog handlers.
+// be used both as structured logging receivers and as drop-in slog handlers and
+// much more.
 //
 // Typical usage pairs the port with one of the provided adapters:
 //
@@ -22,6 +23,7 @@ package logport
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 )
@@ -49,8 +51,10 @@ const (
 	TraceLevel Level = -1
 )
 
-// ForLogging mirrors the capabilities of structured loggers such as
-// charmbracelet/log.
+// ForLogging is a logger with superpowers wrapping several logging backends
+// that plug in as adapters to this port. Prefer the structured helpers over the
+// *f variants when you need maximum efficiency; the formatting versions allocate
+// for convenience when ergonomics matter more than throughput.
 type ForLogging interface {
 	slog.Handler
 	LogLevel(Level) ForLogging
@@ -62,6 +66,20 @@ type ForLogging interface {
 	Fatal(msg string, keyvals ...any)
 	Panic(msg string, keyvals ...any)
 	Trace(msg string, keyvals ...any)
+	// Debugf behaves as old log.Logger log.Printf, consider With(keyvals...)
+	Debugf(format string, v ...any)
+	// Infof behaves as old log.Logger log.Printf, consider With(keyvals...)
+	Infof(format string, v ...any)
+	// Warnf behaves as old log.Logger log.Printf, consider With(keyvals...)
+	Warnf(format string, v ...any)
+	// Errorf behaves as old log.Logger log.Printf, consider With(keyvals...)
+	Errorf(format string, v ...any)
+	// Fatalf behaves as old log.Logger log.Fatalf, consider With(keyvals...)
+	Fatalf(format string, v ...any)
+	// Panicf behaves as old log.Logger log.Panicf, consider With(keyvals...)
+	Panicf(format string, v ...any)
+	// Tracef behaves as old log.Logger log.Printf, consider With(keyvals...)
+	Tracef(format string, v ...any)
 }
 
 var DTGTimeFormat string = "021504"
@@ -99,12 +117,19 @@ type noopLogger struct{}
 func (noopLogger) LogLevel(Level) ForLogging        { return noopLogger{} }
 func (noopLogger) With(keyvals ...any) ForLogging   { return noopLogger{} }
 func (noopLogger) Debug(msg string, keyvals ...any) {}
+func (noopLogger) Debugf(string, ...any)            {}
 func (noopLogger) Info(msg string, keyvals ...any)  {}
+func (noopLogger) Infof(string, ...any)             {}
 func (noopLogger) Warn(msg string, keyvals ...any)  {}
+func (noopLogger) Warnf(string, ...any)             {}
 func (noopLogger) Error(msg string, keyvals ...any) {}
+func (noopLogger) Errorf(string, ...any)            {}
 func (noopLogger) Fatal(msg string, keyvals ...any) { os.Exit(1) }
+func (noopLogger) Fatalf(string, ...any)            { os.Exit(1) }
 func (noopLogger) Panic(msg string, keyvals ...any) { panic(msg) }
+func (noopLogger) Panicf(format string, v ...any)   { panic(fmt.Sprintf(format, v...)) }
 func (noopLogger) Trace(msg string, keyvals ...any) {}
+func (noopLogger) Tracef(string, ...any)            {}
 
 func (noopLogger) Enabled(context.Context, slog.Level) bool  { return false }
 func (noopLogger) Handle(context.Context, slog.Record) error { return nil }

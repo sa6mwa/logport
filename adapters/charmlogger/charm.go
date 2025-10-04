@@ -75,6 +75,10 @@ func (c charmAdapter) Debug(msg string, keyvals ...any) {
 	c.logger.Debug(msg, keyvals...)
 }
 
+func (c charmAdapter) Debugf(format string, args ...any) {
+	c.Debug(formatMessage(format, args...))
+}
+
 func (c charmAdapter) Info(msg string, keyvals ...any) {
 	if c.forceNoLevel() {
 		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
@@ -83,6 +87,10 @@ func (c charmAdapter) Info(msg string, keyvals ...any) {
 	}
 	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Info(msg, keyvals...)
+}
+
+func (c charmAdapter) Infof(format string, args ...any) {
+	c.Info(formatMessage(format, args...))
 }
 
 func (c charmAdapter) Warn(msg string, keyvals ...any) {
@@ -95,6 +103,10 @@ func (c charmAdapter) Warn(msg string, keyvals ...any) {
 	c.logger.Warn(msg, keyvals...)
 }
 
+func (c charmAdapter) Warnf(format string, args ...any) {
+	c.Warn(formatMessage(format, args...))
+}
+
 func (c charmAdapter) Error(msg string, keyvals ...any) {
 	if c.forceNoLevel() {
 		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
@@ -105,9 +117,17 @@ func (c charmAdapter) Error(msg string, keyvals ...any) {
 	c.logger.Error(msg, keyvals...)
 }
 
+func (c charmAdapter) Errorf(format string, args ...any) {
+	c.Error(formatMessage(format, args...))
+}
+
 func (c charmAdapter) Fatal(msg string, keyvals ...any) {
 	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Fatal(msg, keyvals...)
+}
+
+func (c charmAdapter) Fatalf(format string, args ...any) {
+	c.Fatal(formatMessage(format, args...))
 }
 
 func (c charmAdapter) Panic(msg string, keyvals ...any) {
@@ -116,6 +136,10 @@ func (c charmAdapter) Panic(msg string, keyvals ...any) {
 		c.logger.Error(msg, keyvals...)
 	}
 	panic(msg)
+}
+
+func (c charmAdapter) Panicf(format string, args ...any) {
+	c.Panic(formatMessage(format, args...))
 }
 
 func (c charmAdapter) Trace(msg string, keyvals ...any) {
@@ -129,6 +153,10 @@ func (c charmAdapter) Trace(msg string, keyvals ...any) {
 	}
 	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Debug(msg, keyvals...)
+}
+
+func (c charmAdapter) Tracef(format string, args ...any) {
+	c.Trace(formatMessage(format, args...))
 }
 
 func (c charmAdapter) Enabled(_ context.Context, level slog.Level) bool {
@@ -319,4 +347,11 @@ func normalizeCharmKeyvals(keyvals []any, groups []string) []any {
 		}
 	}
 	return normalized
+}
+
+func formatMessage(format string, args ...any) string {
+	if len(args) == 0 {
+		return format
+	}
+	return fmt.Sprintf(format, args...)
 }

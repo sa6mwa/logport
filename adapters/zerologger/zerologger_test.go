@@ -61,6 +61,17 @@ func TestInfoSupportsSlogAttrArgs(t *testing.T) {
 	}
 }
 
+func TestInfofFormatsMessage(t *testing.T) {
+	buf := &bytes.Buffer{}
+	adapter := NewFromLogger(zerolog.New(buf))
+	adapter.Infof("hello %s %d", "world", 7)
+
+	record := decodeZerologJSON(t, buf.Bytes())
+	if record["message"] != "hello world 7" {
+		t.Fatalf("expected formatted message, got %v", record["message"])
+	}
+}
+
 func TestAddFieldsCoversSupportedTypes(t *testing.T) {
 	now := time.Date(2025, time.January, 2, 3, 4, 5, 0, time.UTC)
 	errVal := errors.New("boom")

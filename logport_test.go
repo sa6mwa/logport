@@ -56,10 +56,15 @@ func TestNoopLoggerBehaviour(t *testing.T) {
 
 	// Trace/Debug/etc should be no-ops.
 	logger.Debug("debug", "foo", "bar")
+	logger.Debugf("debug %d", 1)
 	logger.Info("info")
+	logger.Infof("info %s", "fmt")
 	logger.Warn("warn")
+	logger.Warnf("warn %s", "fmt")
 	logger.Error("error")
+	logger.Errorf("error %s", "fmt")
 	logger.Trace("trace")
+	logger.Tracef("trace %s", "fmt")
 
 	// Enabled should always be false and Handle should return nil.
 	if logger.Enabled(context.Background(), slog.LevelInfo) {

@@ -88,6 +88,10 @@ func (a adapter) Debug(msg string, keyvals ...any) {
 	})
 }
 
+func (a adapter) Debugf(format string, args ...any) {
+	a.Debug(formatMessage(format, args...))
+}
+
 func (a adapter) Info(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
@@ -98,6 +102,10 @@ func (a adapter) Info(msg string, keyvals ...any) {
 		}
 		return a.logger.Info()
 	})
+}
+
+func (a adapter) Infof(format string, args ...any) {
+	a.Info(formatMessage(format, args...))
 }
 
 func (a adapter) Warn(msg string, keyvals ...any) {
@@ -112,6 +120,10 @@ func (a adapter) Warn(msg string, keyvals ...any) {
 	})
 }
 
+func (a adapter) Warnf(format string, args ...any) {
+	a.Warn(formatMessage(format, args...))
+}
+
 func (a adapter) Error(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
@@ -124,11 +136,19 @@ func (a adapter) Error(msg string, keyvals ...any) {
 	})
 }
 
+func (a adapter) Errorf(format string, args ...any) {
+	a.Error(formatMessage(format, args...))
+}
+
 func (a adapter) Fatal(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
 	}
 	a.logEntry(a.logger.Fatal(), msg, keyvals)
+}
+
+func (a adapter) Fatalf(format string, args ...any) {
+	a.Fatal(formatMessage(format, args...))
 }
 
 func (a adapter) Panic(msg string, keyvals ...any) {
@@ -142,6 +162,10 @@ func (a adapter) Panic(msg string, keyvals ...any) {
 	a.logEntry(entry, msg, keyvals)
 }
 
+func (a adapter) Panicf(format string, args ...any) {
+	a.Panic(formatMessage(format, args...))
+}
+
 func (a adapter) Trace(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
@@ -152,6 +176,10 @@ func (a adapter) Trace(msg string, keyvals ...any) {
 		}
 		return a.logger.Trace()
 	})
+}
+
+func (a adapter) Tracef(format string, args ...any) {
+	a.Trace(formatMessage(format, args...))
 }
 
 func (a adapter) logEntry(entry *plog.Entry, msg string, keyvals []any) {
@@ -292,6 +320,13 @@ func normalizeKeyvals(keyvals []any, groups []string) []any {
 		}
 	}
 	return normalized
+}
+
+func formatMessage(format string, args ...any) string {
+	if len(args) == 0 {
+		return format
+	}
+	return fmt.Sprintf(format, args...)
 }
 
 func recordToKeyvals(record slog.Record, groups []string) []any {

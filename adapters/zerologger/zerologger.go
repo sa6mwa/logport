@@ -106,10 +106,18 @@ func (a adapter) Debug(msg string, keyvals ...any) {
 	event.Msg(msg)
 }
 
+func (a adapter) Debugf(format string, args ...any) {
+	a.Debug(formatMessage(format, args...))
+}
+
 func (a adapter) Info(msg string, keyvals ...any) {
 	event := a.newEvent(zerolog.InfoLevel)
 	addFields(event, keyvals, a.groups)
 	event.Msg(msg)
+}
+
+func (a adapter) Infof(format string, args ...any) {
+	a.Info(formatMessage(format, args...))
 }
 
 func (a adapter) Warn(msg string, keyvals ...any) {
@@ -118,16 +126,28 @@ func (a adapter) Warn(msg string, keyvals ...any) {
 	event.Msg(msg)
 }
 
+func (a adapter) Warnf(format string, args ...any) {
+	a.Warn(formatMessage(format, args...))
+}
+
 func (a adapter) Error(msg string, keyvals ...any) {
 	event := a.newEvent(zerolog.ErrorLevel)
 	addFields(event, keyvals, a.groups)
 	event.Msg(msg)
 }
 
+func (a adapter) Errorf(format string, args ...any) {
+	a.Error(formatMessage(format, args...))
+}
+
 func (a adapter) Fatal(msg string, keyvals ...any) {
 	event := a.logger.Fatal()
 	addFields(event, keyvals, a.groups)
 	event.Msg(msg)
+}
+
+func (a adapter) Fatalf(format string, args ...any) {
+	a.Fatal(formatMessage(format, args...))
 }
 
 func (a adapter) Panic(msg string, keyvals ...any) {
@@ -139,6 +159,10 @@ func (a adapter) Panic(msg string, keyvals ...any) {
 	event.Msg(msg)
 }
 
+func (a adapter) Panicf(format string, args ...any) {
+	a.Panic(formatMessage(format, args...))
+}
+
 func (a adapter) Trace(msg string, keyvals ...any) {
 	event := a.newEvent(zerolog.TraceLevel)
 	if event == nil {
@@ -146,6 +170,10 @@ func (a adapter) Trace(msg string, keyvals ...any) {
 	}
 	addFields(event, keyvals, a.groups)
 	event.Msg(msg)
+}
+
+func (a adapter) Tracef(format string, args ...any) {
+	a.Trace(formatMessage(format, args...))
 }
 
 func fieldsFromKeyvals(keyvals []any, groups []string) map[string]any {
@@ -416,4 +444,11 @@ func (a adapter) newEvent(level zerolog.Level) *zerolog.Event {
 
 func (a adapter) forceNoLevel() bool {
 	return a.forcedLevel != nil && *a.forcedLevel == port.NoLevel
+}
+
+func formatMessage(format string, args ...any) string {
+	if len(args) == 0 {
+		return format
+	}
+	return fmt.Sprintf(format, args...)
 }

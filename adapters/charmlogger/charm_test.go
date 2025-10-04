@@ -41,6 +41,18 @@ func TestInfoSupportsSlogAttrArgs(t *testing.T) {
 	}
 }
 
+func TestInfofFormatsMessage(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := New(buf)
+
+	logger.Infof("hello %s %d", "world", 7)
+
+	got := buf.String()
+	if !strings.Contains(got, "hello world 7") {
+		t.Fatalf("expected formatted message, got %q", got)
+	}
+}
+
 func TestWithAddsPersistentFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := New(buf)

@@ -135,6 +135,10 @@ func (a adapter) Debug(msg string, keyvals ...any) {
 	a.logger.Debug(msg, fields...)
 }
 
+func (a adapter) Debugf(format string, args ...any) {
+	a.Debug(formatMessage(format, args...))
+}
+
 func (a adapter) Info(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
@@ -144,6 +148,10 @@ func (a adapter) Info(msg string, keyvals ...any) {
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
 	a.logger.Info(msg, fields...)
+}
+
+func (a adapter) Infof(format string, args ...any) {
+	a.Info(formatMessage(format, args...))
 }
 
 func (a adapter) Warn(msg string, keyvals ...any) {
@@ -157,6 +165,10 @@ func (a adapter) Warn(msg string, keyvals ...any) {
 	a.logger.Warn(msg, fields...)
 }
 
+func (a adapter) Warnf(format string, args ...any) {
+	a.Warn(formatMessage(format, args...))
+}
+
 func (a adapter) Error(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
@@ -168,6 +180,10 @@ func (a adapter) Error(msg string, keyvals ...any) {
 	a.logger.Error(msg, fields...)
 }
 
+func (a adapter) Errorf(format string, args ...any) {
+	a.Error(formatMessage(format, args...))
+}
+
 func (a adapter) Fatal(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
@@ -176,12 +192,20 @@ func (a adapter) Fatal(msg string, keyvals ...any) {
 	a.logger.Fatal(msg, fields...)
 }
 
+func (a adapter) Fatalf(format string, args ...any) {
+	a.Fatal(formatMessage(format, args...))
+}
+
 func (a adapter) Panic(msg string, keyvals ...any) {
 	if a.logger == nil {
 		panic(msg)
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
 	a.logger.Panic(msg, fields...)
+}
+
+func (a adapter) Panicf(format string, args ...any) {
+	a.Panic(formatMessage(format, args...))
 }
 
 func (a adapter) Trace(msg string, keyvals ...any) {
@@ -193,6 +217,10 @@ func (a adapter) Trace(msg string, keyvals ...any) {
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
 	a.logger.Debug(msg, fields...)
+}
+
+func (a adapter) Tracef(format string, args ...any) {
+	a.Trace(formatMessage(format, args...))
 }
 
 func (a adapter) Enabled(_ context.Context, level slog.Level) bool {
@@ -363,6 +391,13 @@ func (a adapter) shouldLog(level port.Level) bool {
 	}
 	zapLevel := portLevelToZap(level)
 	return zapLevel >= *a.minLevel
+}
+
+func formatMessage(format string, args ...any) string {
+	if len(args) == 0 {
+		return format
+	}
+	return fmt.Sprintf(format, args...)
 }
 
 func portLevelToZap(level port.Level) zapcore.Level {

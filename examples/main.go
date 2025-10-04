@@ -24,6 +24,7 @@ func main() {
 		slog.Duration("duration", 5*time.Second),
 		"normalKey", "normalValue",
 	)
+	logger.With(slog.String("via", "Warnf")).Warnf("This is a %q message", "convenient")
 	fmt.Println("")
 
 	logger = zerologger.New(os.Stdout).With("logAdapter", "zerologger", "zerologger", true).LogLevel(logport.InfoLevel)
@@ -31,14 +32,14 @@ func main() {
 	logger.Warn("Warning message")
 	logger.Error("Error message")
 	logger.Debug("Debug message") // not shown (LogLevel == Info)
+	l := logger.LogLevel(logport.NoLevel).With("loglevel", logport.NoLevel)
+	l.Info("Hello world, this is log level: NoLevel")
 	logger.Info("This is using slog.Attr groups",
 		slog.String("stringType", "string"),
 		slog.Duration("duration", 5*time.Second),
 		"normalKey", "normalValue",
 	)
-	l := logger.LogLevel(logport.NoLevel).With("loglevel", logport.NoLevel)
-	l.Info("Hello world, this is log level: NoLevel")
-
+	logger.With(slog.String("via", "Warnf")).Warnf("This is a %q message", "convenient")
 	fmt.Println("")
 
 	logger = charmlogger.New(os.Stdout).With("logAdapter", "charmbracelet/log", "charmlogger", true)
@@ -51,6 +52,7 @@ func main() {
 		slog.Duration("duration", 5*time.Second),
 		"normalKey", "normalValue",
 	)
+	logger.With(slog.String("via", "Warnf")).Warnf("This is a %q message", "convenient")
 	fmt.Println("")
 
 	logger = zaplogger.New(os.Stdout).With("logAdapter", "zap").LogLevel(logport.WarnLevel).With("loglevel", logport.WarnLevel)
@@ -62,4 +64,5 @@ func main() {
 		slog.String("stringType", "string"),
 		slog.Duration("duration", 5*time.Second),
 	)
+	logger.With(slog.String("via", "Warnf")).Warnf("This is a %q message", "convenient")
 }
