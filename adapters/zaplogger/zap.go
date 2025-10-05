@@ -13,9 +13,10 @@ import (
 )
 
 type adapter struct {
-	logger   *zap.Logger
-	groups   []string
-	minLevel *zapcore.Level
+	logger          *zap.Logger
+	groups          []string
+	minLevel        *zapcore.Level
+	configuredLevel *port.Level
 }
 
 // Options controls zap-backed adapter configuration.
@@ -109,7 +110,14 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	if len(fields) == 0 {
 		return a
 	}
-	return adapter{logger: a.logger.With(fields...), groups: a.groups, minLevel: a.minLevel}
+	return adapter{logger: a.logger.With(fields...), groups: a.groups, minLevel: a.minLevel, configuredLevel: a.configuredLevel}
+}
+
+func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
+	if level, ok := port.LevelFromEnv(key); ok {
+		return a.LogLevel(level)
+	}
+	return a
 }
 
 func (a adapter) LogLevel(level port.Level) port.ForLogging {
@@ -118,10 +126,16 @@ func (a adapter) LogLevel(level port.Level) port.ForLogging {
 	}
 	if level == port.NoLevel {
 		lvl := zapcore.DebugLevel
-		return adapter{logger: a.logger, groups: a.groups, minLevel: &lvl}
+		configured := level
+		return adapter{logger: a.logger, groups: a.groups, minLevel: &lvl, configuredLevel: &configured}
 	}
-	lvl := portLevelToZap(level)
-	return adapter{logger: a.logger, groups: a.groups, minLevel: &lvl}
+	zapLevel := portLevelToZap(level)
+	configured := level
+	return adapter{logger: a.logger, groups: a.groups, minLevel: &zapLevel, configuredLevel: &configured}
+}
+
+func (a adapter) WithLogLevel() port.ForLogging {
+	return a.With("loglevel", port.LevelString(a.currentLevel()))
 }
 
 func (a adapter) Debug(msg string, keyvals ...any) {
@@ -257,14 +271,14 @@ func (a adapter) WithAttrs(attrs []slog.Attr) slog.Handler {
 	if len(fields) == 0 {
 		return a
 	}
-	return adapter{logger: a.logger.With(fields...), groups: a.groups, minLevel: a.minLevel}
+	return adapter{logger: a.logger.With(fields...), groups: a.groups, minLevel: a.minLevel, configuredLevel: a.configuredLevel}
 }
 
 func (a adapter) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return a
 	}
-	return adapter{logger: a.logger, groups: appendGroup(a.groups, name), minLevel: a.minLevel}
+	return adapter{logger: a.logger, groups: appendGroup(a.groups, name), minLevel: a.minLevel, configuredLevel: a.configuredLevel}
 }
 
 func slogLevelToZap(level slog.Level) zapcore.Level {
@@ -282,6 +296,16 @@ func slogLevelToZap(level slog.Level) zapcore.Level {
 	default:
 		return zapcore.FatalLevel
 	}
+}
+
+func (a adapter) currentLevel() port.Level {
+	if a.configuredLevel != nil {
+		return *a.configuredLevel
+	}
+	if a.minLevel != nil {
+		return zapLevelToPort(*a.minLevel)
+	}
+	return port.InfoLevel
 }
 
 func keyvalsToFields(groups []string, keyvals []any) []zap.Field {
@@ -317,6 +341,27 @@ func keyvalsToFields(groups []string, keyvals []any) []zap.Field {
 		}
 	}
 	return fields
+}
+
+func zapLevelToPort(level zapcore.Level) port.Level {
+	switch level {
+	case zapcore.DebugLevel:
+		return port.DebugLevel
+	case zapcore.InfoLevel:
+		return port.InfoLevel
+	case zapcore.WarnLevel:
+		return port.WarnLevel
+	case zapcore.ErrorLevel:
+		return port.ErrorLevel
+	case zapcore.DPanicLevel, zapcore.FatalLevel:
+		return port.FatalLevel
+	case zapcore.PanicLevel:
+		return port.PanicLevel
+	case zapcore.InvalidLevel:
+		return port.Disabled
+	default:
+		return port.InfoLevel
+	}
 }
 
 func attrsToFields(attrs []slog.Attr, groups []string) []zap.Field {

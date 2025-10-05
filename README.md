@@ -13,7 +13,9 @@ capability-rich interface while remaining free to swap concrete loggers.
   messages—handy for quick logs, though key/value logging remains the
   allocation-free option for hot paths.
 - Level-aware helpers: `Trace`, `Debug`, `Info`, `Warn`, `Error`, `Fatal`, and
-  `Panic` plus chaining through `LogLevel` to create derived loggers.
+  `Panic` plus chaining through `LogLevel`. `LogLevelFromEnv("APP_LOG_LEVEL")`
+  lets you promote severity at runtime, and `WithLogLevel()` stamps the current
+  level into log output for auditability.
 - New log levels include:
   - `TraceLevel` (below debug)
   - `NoLevel` (emit entries without a severity when the backend supports it)
@@ -55,8 +57,21 @@ func main() {
     // Derive a debug logger without mutating the original.
     debug := logger.LogLevel(port.DebugLevel)
     debug.Trace("debugging payload", "payload", map[string]any{"a": 1})
+
+    // Elevate level from the environment and record it in-line.
+    runtimeLogger := logger.LogLevelFromEnv("APP_LOG_LEVEL").WithLogLevel()
+    runtimeLogger.Info("running", "pid", os.Getpid())
 }
 ```
+
+### Runtime level control
+
+`LogLevelFromEnv` recognises the following (case insensitive) values: `trace`,
+`debug`, `info`, `warn`, `warning`, `error`, `fatal`, `panic`, `no`, `nolevel`,
+`disabled`, and `off`. Missing or invalid values are silently ignored. Pair
+`LogLevelFromEnv` with `WithLogLevel()` to add a `loglevel` field to each entry
+so downstream systems can confirm what severity is active without scanning
+configuration.
 
 ## Log Levels
 
@@ -86,6 +101,18 @@ untouched so you can fan out per-component loggers easily.
 | zerolog Console| Displays the built-in `???` placeholder (zerolog default).  |
 | zap            | Maps `NoLevel` to `Debug` (zap lacks a native level-less mode). |
 
+## Adapter Notes
+
+- **onelogger** – timestamps are injected by default using `port.DTGTimeFormat`
+  (`HHMMSS`). Supply `Options{TimeFormat: time.RFC3339}` to change the layout or
+  `Options{DisableTimestamp: true}` to suppress the field entirely.
+- **zerologger** – pass `Options{Structured: true}` or call `NewStructured` for
+  raw JSON logs, and `Options{DisableTimestamp: true}` to leave the timestamp
+  out altogether.
+- **zaplogger** – the adapter tracks the configured level so
+  `WithLogLevel()` reflects the active zap core even after calling
+  `LogLevelFromEnv` or chaining additional `With(...)` calls.
+
 ## Panic and Fatal Helpers
 
 `Fatal` exits the process with status code 1 after logging. `Panic` logs at the
@@ -107,5 +134,6 @@ Run the full suite with:
 go test ./...
 ```
 
-Adapter-specific tests assert `NoLevel` behaviour, `LogLevel` chaining, and the
-additional helper methods to prevent regressions.
+Adapter-specific tests assert `NoLevel` behaviour, `LogLevel` chaining,
+environment-driven level changes, and the additional helper methods to prevent
+regressions.

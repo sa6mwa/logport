@@ -155,6 +155,17 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	return adapter{logger: ctx.Logger(), groups: a.groups, forcedLevel: a.forcedLevel}
 }
 
+func (a adapter) WithLogLevel() port.ForLogging {
+	return a.With("loglevel", port.LevelString(a.currentLevel()))
+}
+
+func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
+	if level, ok := port.LevelFromEnv(key); ok {
+		return a.LogLevel(level)
+	}
+	return a
+}
+
 func (a adapter) LogLevel(level port.Level) port.ForLogging {
 	if level == port.NoLevel {
 		lvl := level
@@ -469,6 +480,13 @@ func joinAttrKey(groups []string, key string) string {
 	return strings.Join(parts, ".")
 }
 
+func (a adapter) currentLevel() port.Level {
+	if a.forcedLevel != nil {
+		return *a.forcedLevel
+	}
+	return zerologLevelToPort(a.logger.GetLevel())
+}
+
 func portLevelToZero(level port.Level) zerolog.Level {
 	switch level {
 	case port.TraceLevel:
@@ -491,6 +509,31 @@ func portLevelToZero(level port.Level) zerolog.Level {
 		return zerolog.Disabled
 	default:
 		return zerolog.InfoLevel
+	}
+}
+
+func zerologLevelToPort(level zerolog.Level) port.Level {
+	switch level {
+	case zerolog.TraceLevel:
+		return port.TraceLevel
+	case zerolog.DebugLevel:
+		return port.DebugLevel
+	case zerolog.InfoLevel:
+		return port.InfoLevel
+	case zerolog.WarnLevel:
+		return port.WarnLevel
+	case zerolog.ErrorLevel:
+		return port.ErrorLevel
+	case zerolog.FatalLevel:
+		return port.FatalLevel
+	case zerolog.PanicLevel:
+		return port.PanicLevel
+	case zerolog.NoLevel:
+		return port.NoLevel
+	case zerolog.Disabled:
+		return port.Disabled
+	default:
+		return port.InfoLevel
 	}
 }
 

@@ -54,6 +54,27 @@ func (c charmAdapter) LogLevel(level port.Level) port.ForLogging {
 	return charmAdapter{logger: clone, groups: c.groups}
 }
 
+func (c charmAdapter) LogLevelFromEnv(key string) port.ForLogging {
+	if level, ok := port.LevelFromEnv(key); ok {
+		return c.LogLevel(level)
+	}
+	return c
+}
+
+func (c charmAdapter) WithLogLevel() port.ForLogging {
+	return c.With("loglevel", port.LevelString(c.currentLevel()))
+}
+
+func (c charmAdapter) currentLevel() port.Level {
+	if c.forcedLevel != nil {
+		return *c.forcedLevel
+	}
+	if c.logger == nil {
+		return port.InfoLevel
+	}
+	return charmLevelToPort(c.logger.GetLevel())
+}
+
 func (c charmAdapter) With(keyvals ...any) port.ForLogging {
 	if c.logger == nil || len(keyvals) == 0 {
 		return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: c.forcedLevel}
@@ -299,6 +320,23 @@ func portLevelToCharm(level port.Level) log.Level {
 		return log.FatalLevel + 1
 	default:
 		return log.InfoLevel
+	}
+}
+
+func charmLevelToPort(level log.Level) port.Level {
+	switch level {
+	case log.DebugLevel:
+		return port.DebugLevel
+	case log.InfoLevel:
+		return port.InfoLevel
+	case log.WarnLevel:
+		return port.WarnLevel
+	case log.ErrorLevel:
+		return port.ErrorLevel
+	case log.FatalLevel:
+		return port.FatalLevel
+	default:
+		return port.InfoLevel
 	}
 }
 

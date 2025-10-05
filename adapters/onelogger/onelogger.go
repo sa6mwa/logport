@@ -108,6 +108,13 @@ type adapter struct {
 	minLevel    port.Level
 }
 
+func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
+	if level, ok := port.LevelFromEnv(key); ok {
+		return a.LogLevel(level)
+	}
+	return a
+}
+
 func (a adapter) LogLevel(level port.Level) port.ForLogging {
 	switch level {
 	case port.NoLevel, port.Disabled:
@@ -130,6 +137,10 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	base = append(base, a.baseKeyvals...)
 	base = append(base, addition...)
 	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups, forcedLevel: a.forcedLevel, minLevel: a.minLevel}
+}
+
+func (a adapter) WithLogLevel() port.ForLogging {
+	return a.With("loglevel", port.LevelString(a.currentLevel()))
 }
 
 func (a adapter) Debug(msg string, keyvals ...any) { a.log(port.DebugLevel, msg, keyvals) }
@@ -451,6 +462,16 @@ func formatMessage(format string, args ...any) string {
 		return format
 	}
 	return fmt.Sprintf(format, args...)
+}
+
+func (a adapter) currentLevel() port.Level {
+	if a.forcedLevel != nil {
+		return *a.forcedLevel
+	}
+	if a.minLevel != 0 {
+		return a.minLevel
+	}
+	return port.InfoLevel
 }
 
 func composeHook(opts Options) func(onelogpkg.Entry) {

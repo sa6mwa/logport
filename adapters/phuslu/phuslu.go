@@ -59,6 +59,17 @@ func (a adapter) LogLevel(level port.Level) port.ForLogging {
 	return adapter{logger: &clone, baseKeyvals: a.baseKeyvals, groups: a.groups}
 }
 
+func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
+	if level, ok := port.LevelFromEnv(key); ok {
+		return a.LogLevel(level)
+	}
+	return a
+}
+
+func (a adapter) WithLogLevel() port.ForLogging {
+	return a.With("loglevel", port.LevelString(a.currentLevel()))
+}
+
 func (a adapter) With(keyvals ...any) port.ForLogging {
 	if len(keyvals) == 0 {
 		return a
@@ -392,7 +403,15 @@ func joinAttrKey(groups []string, key string) string {
 	return strings.Join(parts, ".")
 }
 
-var _ port.ForLogging = adapter{}
+func (a adapter) currentLevel() port.Level {
+	if a.forcedLevel != nil {
+		return *a.forcedLevel
+	}
+	if a.logger == nil {
+		return port.InfoLevel
+	}
+	return phusluLevelToPort(a.logger.Level)
+}
 
 func portLevelToPhuslu(level port.Level) plog.Level {
 	switch level {
@@ -416,6 +435,29 @@ func portLevelToPhuslu(level port.Level) plog.Level {
 		return plog.InfoLevel
 	}
 }
+
+func phusluLevelToPort(level plog.Level) port.Level {
+	switch level {
+	case plog.TraceLevel:
+		return port.TraceLevel
+	case plog.DebugLevel:
+		return port.DebugLevel
+	case plog.InfoLevel:
+		return port.InfoLevel
+	case plog.WarnLevel:
+		return port.WarnLevel
+	case plog.ErrorLevel:
+		return port.ErrorLevel
+	case plog.FatalLevel:
+		return port.FatalLevel
+	case plog.PanicLevel:
+		return port.PanicLevel
+	default:
+		return port.InfoLevel
+	}
+}
+
+var _ port.ForLogging = adapter{}
 
 func (a adapter) emit(msg string, keyvals []any, entryFactory func() *plog.Entry) {
 	entry := entryFactory()
