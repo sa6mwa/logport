@@ -180,6 +180,47 @@ func (a adapter) Debug(msg string, keyvals ...any) {
 	event.Msg(msg)
 }
 
+func (a adapter) Log(_ context.Context, level slog.Level, msg string, keyvals ...any) {
+	a.Logp(port.LevelFromSlog(level), msg, keyvals...)
+}
+
+func (a adapter) Logp(level port.Level, msg string, keyvals ...any) {
+	switch level {
+	case port.TraceLevel:
+		a.Trace(msg, keyvals...)
+	case port.DebugLevel:
+		a.Debug(msg, keyvals...)
+	case port.InfoLevel:
+		a.Info(msg, keyvals...)
+	case port.WarnLevel:
+		a.Warn(msg, keyvals...)
+	case port.ErrorLevel:
+		a.Error(msg, keyvals...)
+	case port.FatalLevel:
+		a.Fatal(msg, keyvals...)
+	case port.PanicLevel:
+		a.Panic(msg, keyvals...)
+	case port.NoLevel:
+		a.logNoLevel(msg, keyvals...)
+	case port.Disabled:
+		return
+	default:
+		a.Info(msg, keyvals...)
+	}
+}
+
+func (a adapter) Logs(level string, msg string, keyvals ...any) {
+	if lvl, ok := port.ParseLevel(level); ok {
+		a.Logp(lvl, msg, keyvals...)
+		return
+	}
+	a.Logp(port.NoLevel, msg, keyvals...)
+}
+
+func (a adapter) Logf(level port.Level, format string, args ...any) {
+	a.Logp(level, formatMessage(format, args...))
+}
+
 func (a adapter) Debugf(format string, args ...any) {
 	a.Debug(formatMessage(format, args...))
 }
@@ -559,6 +600,12 @@ func (a adapter) newEvent(level zerolog.Level) *zerolog.Event {
 
 func (a adapter) forceNoLevel() bool {
 	return a.forcedLevel != nil && *a.forcedLevel == port.NoLevel
+}
+
+func (a adapter) logNoLevel(msg string, keyvals ...any) {
+	event := a.logger.Log()
+	addFields(event, keyvals, a.groups)
+	event.Msg(msg)
 }
 
 func formatMessage(format string, args ...any) string {

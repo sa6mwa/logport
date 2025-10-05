@@ -65,6 +65,47 @@ func (c charmAdapter) WithLogLevel() port.ForLogging {
 	return c.With("loglevel", port.LevelString(c.currentLevel()))
 }
 
+func (c charmAdapter) Log(_ context.Context, level slog.Level, msg string, keyvals ...any) {
+	c.Logp(port.LevelFromSlog(level), msg, keyvals...)
+}
+
+func (c charmAdapter) Logp(level port.Level, msg string, keyvals ...any) {
+	switch level {
+	case port.TraceLevel:
+		c.Trace(msg, keyvals...)
+	case port.DebugLevel:
+		c.Debug(msg, keyvals...)
+	case port.InfoLevel:
+		c.Info(msg, keyvals...)
+	case port.WarnLevel:
+		c.Warn(msg, keyvals...)
+	case port.ErrorLevel:
+		c.Error(msg, keyvals...)
+	case port.FatalLevel:
+		c.Fatal(msg, keyvals...)
+	case port.PanicLevel:
+		c.Panic(msg, keyvals...)
+	case port.NoLevel:
+		c.logNoLevel(msg, keyvals...)
+	case port.Disabled:
+		return
+	default:
+		c.Info(msg, keyvals...)
+	}
+}
+
+func (c charmAdapter) Logs(level string, msg string, keyvals ...any) {
+	if lvl, ok := port.ParseLevel(level); ok {
+		c.Logp(lvl, msg, keyvals...)
+		return
+	}
+	c.Logp(port.NoLevel, msg, keyvals...)
+}
+
+func (c charmAdapter) Logf(level port.Level, format string, args ...any) {
+	c.Logp(level, formatMessage(format, args...))
+}
+
 func (c charmAdapter) currentLevel() port.Level {
 	if c.forcedLevel != nil {
 		return *c.forcedLevel
@@ -338,6 +379,14 @@ func charmLevelToPort(level log.Level) port.Level {
 	default:
 		return port.InfoLevel
 	}
+}
+
+func (c charmAdapter) logNoLevel(msg string, keyvals ...any) {
+	if c.logger == nil {
+		return
+	}
+	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
+	c.logger.Print(msg, keyvals...)
 }
 
 func (c charmAdapter) forceNoLevel() bool {

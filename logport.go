@@ -58,35 +58,68 @@ const (
 // for convenience when ergonomics matter more than throughput.
 type ForLogging interface {
 	slog.Handler
-	// LogLevelFromEnv configures the adapters log level from environment variable
-	// key. Values can be trace, debug, info, warn, warning, error, fatal, panic,
-	// no, nolevel (in any case). If envvar key has an empty or invalid value, the
-	// log level will (silently) not be set.
+
+	// LogLevelFromEnv configures the logger's level using the value of key in the
+	// environment. Recognised values are the same as ParseLevel. Missing or
+	// invalid values leave the logger unchanged.
 	LogLevelFromEnv(key string) ForLogging
+
+	// LogLevel returns a logger derived from the receiver whose minimum level is
+	// set to level. The receiver itself is not modified.
 	LogLevel(Level) ForLogging
-	// WithLogLevel adds a "loglevel" field describing the logger's current level.
+
+	// WithLogLevel returns a logger that carries a `loglevel` field describing
+	// the logger's effective severity.
 	WithLogLevel() ForLogging
+
+	// With returns a logger that includes the supplied key/value pairs on every
+	// subsequent log entry. The receiver remains untouched.
 	With(keyvals ...any) ForLogging
+
+	// Log mirrors slog.Logger.Log and emits msg at the provided slog level using
+	// the supplied context and key/value pairs.
+	Log(ctx context.Context, level slog.Level, msg string, keyvals ...any)
+
+	// Logp emits msg at the supplied logport level.
+	Logp(level Level, msg string, keyvals ...any)
+
+	// Logs emits msg using the level encoded in the string. Unknown or empty
+	// values fall back to NoLevel semantics.
+	Logs(level string, msg string, keyvals ...any)
+
+	// Logf formats msg using fmt.Sprintf semantics and logs it at the supplied
+	// logport level.
+	Logf(level Level, format string, v ...any)
+
+	// Debug logs msg at DebugLevel.
 	Debug(msg string, keyvals ...any)
+	// Info logs msg at InfoLevel.
 	Info(msg string, keyvals ...any)
+	// Warn logs msg at WarnLevel.
 	Warn(msg string, keyvals ...any)
+	// Error logs msg at ErrorLevel.
 	Error(msg string, keyvals ...any)
+	// Fatal logs msg at FatalLevel and terminates the process when the backend
+	// supports it.
 	Fatal(msg string, keyvals ...any)
+	// Panic logs msg at PanicLevel and panics when the backend supports it.
 	Panic(msg string, keyvals ...any)
+	// Trace logs msg at TraceLevel (below DebugLevel).
 	Trace(msg string, keyvals ...any)
-	// Debugf behaves as old log.Logger log.Printf, consider With(keyvals...)
+
+	// Debugf logs a formatted message at DebugLevel.
 	Debugf(format string, v ...any)
-	// Infof behaves as old log.Logger log.Printf, consider With(keyvals...)
+	// Infof logs a formatted message at InfoLevel.
 	Infof(format string, v ...any)
-	// Warnf behaves as old log.Logger log.Printf, consider With(keyvals...)
+	// Warnf logs a formatted message at WarnLevel.
 	Warnf(format string, v ...any)
-	// Errorf behaves as old log.Logger log.Printf, consider With(keyvals...)
+	// Errorf logs a formatted message at ErrorLevel.
 	Errorf(format string, v ...any)
-	// Fatalf behaves as old log.Logger log.Fatalf, consider With(keyvals...)
+	// Fatalf logs a formatted message at FatalLevel.
 	Fatalf(format string, v ...any)
-	// Panicf behaves as old log.Logger log.Panicf, consider With(keyvals...)
+	// Panicf logs a formatted message at PanicLevel.
 	Panicf(format string, v ...any)
-	// Tracef behaves as old log.Logger log.Printf, consider With(keyvals...)
+	// Tracef logs a formatted message at TraceLevel.
 	Tracef(format string, v ...any)
 }
 
@@ -122,24 +155,28 @@ func NoopLogger() ForLogging {
 
 type noopLogger struct{}
 
-func (noopLogger) LogLevel(Level) ForLogging           { return noopLogger{} }
-func (n noopLogger) LogLevelFromEnv(string) ForLogging { return n }
-func (noopLogger) WithLogLevel() ForLogging            { return noopLogger{} }
-func (noopLogger) With(keyvals ...any) ForLogging      { return noopLogger{} }
-func (noopLogger) Debug(msg string, keyvals ...any)    {}
-func (noopLogger) Debugf(string, ...any)               {}
-func (noopLogger) Info(msg string, keyvals ...any)     {}
-func (noopLogger) Infof(string, ...any)                {}
-func (noopLogger) Warn(msg string, keyvals ...any)     {}
-func (noopLogger) Warnf(string, ...any)                {}
-func (noopLogger) Error(msg string, keyvals ...any)    {}
-func (noopLogger) Errorf(string, ...any)               {}
-func (noopLogger) Fatal(msg string, keyvals ...any)    { os.Exit(1) }
-func (noopLogger) Fatalf(string, ...any)               { os.Exit(1) }
-func (noopLogger) Panic(msg string, keyvals ...any)    { panic(msg) }
-func (noopLogger) Panicf(format string, v ...any)      { panic(fmt.Sprintf(format, v...)) }
-func (noopLogger) Trace(msg string, keyvals ...any)    {}
-func (noopLogger) Tracef(string, ...any)               {}
+func (noopLogger) LogLevel(Level) ForLogging                       { return noopLogger{} }
+func (n noopLogger) LogLevelFromEnv(string) ForLogging             { return n }
+func (noopLogger) WithLogLevel() ForLogging                        { return noopLogger{} }
+func (noopLogger) Log(context.Context, slog.Level, string, ...any) {}
+func (noopLogger) Logp(Level, string, ...any)                      {}
+func (noopLogger) Logs(string, string, ...any)                     {}
+func (noopLogger) Logf(Level, string, ...any)                      {}
+func (noopLogger) With(keyvals ...any) ForLogging                  { return noopLogger{} }
+func (noopLogger) Debug(msg string, keyvals ...any)                {}
+func (noopLogger) Debugf(string, ...any)                           {}
+func (noopLogger) Info(msg string, keyvals ...any)                 {}
+func (noopLogger) Infof(string, ...any)                            {}
+func (noopLogger) Warn(msg string, keyvals ...any)                 {}
+func (noopLogger) Warnf(string, ...any)                            {}
+func (noopLogger) Error(msg string, keyvals ...any)                {}
+func (noopLogger) Errorf(string, ...any)                           {}
+func (noopLogger) Fatal(msg string, keyvals ...any)                { os.Exit(1) }
+func (noopLogger) Fatalf(string, ...any)                           { os.Exit(1) }
+func (noopLogger) Panic(msg string, keyvals ...any)                { panic(msg) }
+func (noopLogger) Panicf(format string, v ...any)                  { panic(fmt.Sprintf(format, v...)) }
+func (noopLogger) Trace(msg string, keyvals ...any)                {}
+func (noopLogger) Tracef(string, ...any)                           {}
 
 func (noopLogger) Enabled(context.Context, slog.Level) bool  { return false }
 func (noopLogger) Handle(context.Context, slog.Record) error { return nil }
@@ -184,6 +221,24 @@ func LevelFromEnv(key string) (Level, bool) {
 		return InfoLevel, false
 	}
 	return ParseLevel(value)
+}
+
+// LevelFromSlog translates a slog.Level into the closest logport Level.
+func LevelFromSlog(level slog.Level) Level {
+	switch {
+	case level < slog.LevelDebug:
+		return TraceLevel
+	case level < slog.LevelInfo:
+		return DebugLevel
+	case level < slog.LevelWarn:
+		return InfoLevel
+	case level < slog.LevelError:
+		return WarnLevel
+	case level < slog.LevelError+4:
+		return ErrorLevel
+	default:
+		return FatalLevel
+	}
 }
 
 // LevelString returns the canonical string representation of a Level.

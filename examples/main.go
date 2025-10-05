@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -50,9 +51,14 @@ func main() {
 	}).With("adapter", "zerologger", "options", zopts)
 	logger.Info("Disabled timestamp field")
 	logger.Warn("Disabled timestamp field, warning")
+	logger.Logp(logport.WarnLevel, "This is Logp at warning level")
+	logger.WithLogLevel().Logs("info", "This is Logs at info level")
+
+	fmt.Println("")
 
 	logger = zerologger.NewStructured(os.Stdout).With("adapter", "zerologger")
 	logger.Warn("This is zerologger.NewStructured(os.Stdout)")
+	logger.WithLogLevel().Log(context.Background(), slog.LevelInfo, "This is Log, a replacement for slog.Logger.Log", "slog.LevelInfo", slog.LevelInfo)
 
 	zopts = zerologger.Options{
 		DisableTimestamp: true,

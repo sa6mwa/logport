@@ -71,7 +71,10 @@ func main() {
 `disabled`, and `off`. Missing or invalid values are silently ignored. Pair
 `LogLevelFromEnv` with `WithLogLevel()` to add a `loglevel` field to each entry
 so downstream systems can confirm what severity is active without scanning
-configuration.
+configuration. When you need to mirror `slog.Logger.Log`, use `Log(ctx, level,
+msg, keyvals...)`. Prefer `Logp(port.DebugLevel, ...)` for the richer logport
+levels, `Logs("warn", ...)` when the severity arrives as text, or
+`Logf(port.InfoLevel, "ready in %v", took)` for formatted messages.
 
 ## Log Levels
 
