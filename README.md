@@ -24,6 +24,7 @@ capability-rich interface while remaining free to swap concrete loggers.
   - Charmbracelet [log](https://github.com/charmbracelet/log)
   - [phuslu/log](https://github.com/phuslu/log)
   - [rs/zerolog](https://github.com/rs/zerolog)
+  - [francoispqt/onelog](https://github.com/francoispqt/onelog)
   - [go.uber.org/zap](https://github.com/uber-go/zap)
 
 ## Quick Start
@@ -35,6 +36,7 @@ import (
     "os"
 
     port "github.com/sa6mwa/logport"
+    onelogger "github.com/sa6mwa/logport/adapters/onelogger"
     "github.com/sa6mwa/logport/adapters/zerologger"
 )
 
@@ -45,6 +47,10 @@ func main() {
     // Switch to JSON output if you'd rather stream structured logs.
     jsonLogger := zerologger.NewStructured(os.Stdout)
     jsonLogger.Info("ready", "component", "worker", "addr", ":8080")
+
+    // Pick onelog when you want lean JSON with minimal allocation overhead.
+    minimal := onelogger.New(os.Stdout)
+    minimal.Info("ready", "component", "worker")
 
     // Derive a debug logger without mutating the original.
     debug := logger.LogLevel(port.DebugLevel)

@@ -1,3 +1,4 @@
+// Example of various logport adapters.
 package main
 
 import (
@@ -8,6 +9,7 @@ import (
 
 	"github.com/sa6mwa/logport"
 	"github.com/sa6mwa/logport/adapters/charmlogger"
+	"github.com/sa6mwa/logport/adapters/onelogger"
 	"github.com/sa6mwa/logport/adapters/phuslu"
 	"github.com/sa6mwa/logport/adapters/zaplogger"
 	"github.com/sa6mwa/logport/adapters/zerologger"
@@ -84,4 +86,26 @@ func main() {
 		slog.Duration("duration", 5*time.Second),
 	)
 	logger.With(slog.String("via", "Warnf")).Warnf("This is a %q message", "convenient")
+	fmt.Println("")
+
+	logger = onelogger.New(os.Stdout).With("adapter", "onelogger")
+	logger.Info("This is github.com/francoispqt/onelog")
+	logger.Warn("A warning message")
+	logger.Debug("This is a debug message", "debugging", true)
+	logger.Trace("Testing trace level with slog.Group", slog.Group("group", "key", "value", "key2", "value2"))
+	oopts := onelogger.Options{
+		ContextName: "testContext",
+	}
+	// options (oopts) will not be printed by onelog for some reason, despite
+	// trying a custom JSON marshaller on the Options struct.
+	logger = onelogger.NewWithOptions(os.Stdout, oopts).LogLevel(logport.WarnLevel).With("adapter", "onelogger", "options", oopts)
+	logger.Info("This should not show", "loglevel", logport.WarnLevel)
+	logger.Warn("This should show as loglevel is Warn")
+	oopts = onelogger.Options{
+		DisableTimestamp: true,
+	}
+	logger = onelogger.NewWithOptions(os.Stdout, oopts).With("adapter", "onelogger", "options", oopts)
+	logger.Info("Timestamp field (ts) is disabled")
+	logger.Warnf("A %s warning %s", "printf", "msg")
+
 }
