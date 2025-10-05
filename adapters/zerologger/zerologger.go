@@ -2,6 +2,7 @@ package zerologger
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -39,12 +40,56 @@ type Options struct {
 
 	// DisableTimestamp skips attaching timestamp to every log entry.
 	DisableTimestamp bool
+
+	// Structured switches the adapter to structured (JSON) output instead of
+	// zerolog's console writer. ConfigureWriter is ignored when Structured is true.
+	Structured bool
+}
+
+// optionsJSON mirrors Options for JSON serialization without the ConfigureWriter.
+type optionsJSON struct {
+	Level            *zerolog.Level `json:"level,omitempty"`
+	NoColor          bool           `json:"noColor,omitempty"`
+	TimeFormat       string         `json:"timeFormat,omitempty"`
+	DisableTimestamp bool           `json:"disableTimestamp,omitempty"`
+	Structured       bool           `json:"structured,omitempty"`
+}
+
+// MarshalJSON supports encoding Options while omitting ConfigureWriter.
+func (o Options) MarshalJSON() ([]byte, error) {
+	return json.Marshal(optionsJSON{
+		Level:            o.Level,
+		NoColor:          o.NoColor,
+		TimeFormat:       o.TimeFormat,
+		DisableTimestamp: o.DisableTimestamp,
+		Structured:       o.Structured,
+	})
+}
+
+// UnmarshalJSON restores Options from JSON while leaving ConfigureWriter unset.
+func (o *Options) UnmarshalJSON(data []byte) error {
+	var aux optionsJSON
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	o.Level = aux.Level
+	o.NoColor = aux.NoColor
+	o.TimeFormat = aux.TimeFormat
+	o.DisableTimestamp = aux.DisableTimestamp
+	o.Structured = aux.Structured
+	o.ConfigureWriter = nil
+	return nil
 }
 
 // New returns a zerolog-backed ForLogging implementation with sensible
 // defaults that produce the familiar, colored console output.
 func New(w io.Writer) port.ForLogging {
 	return NewWithOptions(w, Options{})
+}
+
+// NewStructured returns a zerolog-backed ForLogging implementation with structured JSON output.
+func NewStructured(w io.Writer) port.ForLogging {
+	return NewWithOptions(w, Options{Structured: true})
 }
 
 func NewFromLogger(logger zerolog.Logger) port.ForLogging {
@@ -54,19 +99,34 @@ func NewFromLogger(logger zerolog.Logger) port.ForLogging {
 // NewWithOptions returns a zerolog-backed ForLogging implementation with the
 // supplied writer and options applied.
 func NewWithOptions(w io.Writer, o Options) port.ForLogging {
-	if o.TimeFormat == "" {
-		o.TimeFormat = port.DTGTimeFormat
+	useConsole := !o.Structured
+	if useConsole {
+		if o.TimeFormat == "" {
+			o.TimeFormat = port.DTGTimeFormat
+		}
+		noColor := o.NoColor || !isTerminal(w)
+		writer := zerolog.ConsoleWriter{
+			Out:        w,
+			NoColor:    noColor,
+			TimeFormat: o.TimeFormat,
+		}
+		if o.ConfigureWriter != nil {
+			o.ConfigureWriter(&writer)
+		}
+		if o.DisableTimestamp {
+			writer.PartsExclude = appendUnique(writer.PartsExclude, zerolog.TimestampFieldName)
+		}
+		logger := zerolog.New(writer)
+		if !o.DisableTimestamp {
+			logger = logger.With().Timestamp().Logger()
+		}
+		if o.Level != nil {
+			logger = logger.Level(*o.Level)
+		}
+		return adapter{logger: logger}
 	}
-	noColor := o.NoColor || !isTerminal(w)
-	writer := zerolog.ConsoleWriter{
-		Out:        w,
-		NoColor:    noColor,
-		TimeFormat: o.TimeFormat,
-	}
-	if o.ConfigureWriter != nil {
-		o.ConfigureWriter(&writer)
-	}
-	logger := zerolog.New(writer)
+
+	logger := zerolog.New(w)
 	if !o.DisableTimestamp {
 		logger = logger.With().Timestamp().Logger()
 	}
@@ -174,6 +234,15 @@ func (a adapter) Trace(msg string, keyvals ...any) {
 
 func (a adapter) Tracef(format string, args ...any) {
 	a.Trace(formatMessage(format, args...))
+}
+
+func appendUnique(parts []string, part string) []string {
+	for _, existing := range parts {
+		if existing == part {
+			return parts
+		}
+	}
+	return append(parts, part)
 }
 
 func fieldsFromKeyvals(keyvals []any, groups []string) map[string]any {

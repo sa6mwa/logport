@@ -290,6 +290,118 @@ func TestNoLevelConsoleWriterShowsPlaceholder(t *testing.T) {
 	}
 }
 
+func TestDisableTimestampOmitsConsoleTimestamp(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewWithOptions(buf, Options{NoColor: true, DisableTimestamp: true})
+	logger.Info("no timestamp", "foo", "bar")
+
+	out := strings.TrimSpace(buf.String())
+	if out == "" {
+		t.Fatalf("expected console output, got empty string")
+	}
+	if strings.Contains(out, "<nil>") {
+		t.Fatalf("expected timestamp to be omitted instead of <nil>, got %q", out)
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		t.Fatalf("expected console output fields, got %q", out)
+	}
+	if fields[0] != "INF" {
+		t.Fatalf("expected console line to start with level, got %q", fields[0])
+	}
+}
+
+func TestOptionsJSONRoundTrip(t *testing.T) {
+	configureWriterCalled := false
+	lvl := zerolog.WarnLevel
+	original := Options{
+		ConfigureWriter: func(w *zerolog.ConsoleWriter) {
+			configureWriterCalled = true
+		},
+		Level:            &lvl,
+		NoColor:          true,
+		TimeFormat:       "custom-format",
+		DisableTimestamp: true,
+		Structured:       true,
+	}
+
+	b, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal should succeed: %v", err)
+	}
+	if strings.Contains(string(b), "ConfigureWriter") {
+		t.Fatalf("marshal should omit ConfigureWriter, got %q", string(b))
+	}
+
+	var decoded Options
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatalf("unmarshal should succeed: %v", err)
+	}
+	if decoded.Level == nil || *decoded.Level != lvl {
+		t.Fatalf("expected level %v, got %v", lvl, decoded.Level)
+	}
+	if !decoded.NoColor {
+		t.Fatalf("expected NoColor to be true")
+	}
+	if decoded.TimeFormat != "custom-format" {
+		t.Fatalf("expected TimeFormat to round-trip, got %q", decoded.TimeFormat)
+	}
+	if !decoded.DisableTimestamp {
+		t.Fatalf("expected DisableTimestamp to be true")
+	}
+	if !decoded.Structured {
+		t.Fatalf("expected Structured to be true")
+	}
+	if decoded.ConfigureWriter != nil {
+		t.Fatalf("expected ConfigureWriter to be nil after unmarshal")
+	}
+	if configureWriterCalled {
+		t.Fatalf("expected ConfigureWriter not to be invoked during marshal/unmarshal")
+	}
+}
+
+func TestNewStructuredEmitsJSON(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewStructured(buf)
+	logger.Info("structured", "foo", "bar")
+
+	line := strings.TrimSpace(buf.String())
+	if line == "" {
+		t.Fatalf("expected structured log output")
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(line), &record); err != nil {
+		t.Fatalf("expected JSON output, got %q: %v", line, err)
+	}
+	if record["message"] != "structured" {
+		t.Fatalf("expected message field, got %v", record["message"])
+	}
+	if record["foo"] != "bar" {
+		t.Fatalf("expected foo=bar, got %v", record["foo"])
+	}
+}
+
+func TestStructuredOptionDisablesConsoleFormatting(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewWithOptions(buf, Options{Structured: true, DisableTimestamp: true})
+	logger.Warn("structured option", "foo", "bar")
+
+	line := strings.TrimSpace(buf.String())
+	if strings.Contains(line, "	") || strings.Contains(line, " ") && strings.Contains(line, "foo=bar") {
+		t.Fatalf("expected JSON formatted output, got %q", line)
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(line), &record); err != nil {
+		t.Fatalf("expected JSON output, got %q: %v", line, err)
+	}
+	if record["level"] != "warn" {
+		t.Fatalf("expected warn level, got %v", record["level"])
+	}
+	if record["foo"] != "bar" {
+		t.Fatalf("expected foo=bar, got %v", record["foo"])
+	}
+}
+
 func decodeZerologJSON(t *testing.T, data []byte) map[string]any {
 	if len(data) == 0 {
 		t.Fatalf("expected log output, got empty data")

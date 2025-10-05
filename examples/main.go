@@ -40,6 +40,25 @@ func main() {
 		"normalKey", "normalValue",
 	)
 	logger.With(slog.String("via", "Warnf")).Warnf("This is a %q message", "convenient")
+	zopts := zerologger.Options{
+		DisableTimestamp: true,
+	}
+	logger = zerologger.NewWithOptions(os.Stdout, zerologger.Options{
+		DisableTimestamp: true,
+	}).With("adapter", "zerologger", "options", zopts)
+	logger.Info("Disabled timestamp field")
+	logger.Warn("Disabled timestamp field, warning")
+
+	logger = zerologger.NewStructured(os.Stdout).With("adapter", "zerologger")
+	logger.Warn("This is zerologger.NewStructured(os.Stdout)")
+
+	zopts = zerologger.Options{
+		DisableTimestamp: true,
+		Structured:       true,
+	}
+	logger = zerologger.NewWithOptions(os.Stdout, zopts).With("adapter", "zerologger").With("options", zopts)
+	logger.Error("This is zerologger.NewWithOptions with disabled timestamps")
+
 	fmt.Println("")
 
 	logger = charmlogger.New(os.Stdout).With("logAdapter", "charmbracelet/log", "charmlogger", true)
