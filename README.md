@@ -18,6 +18,8 @@ capability-rich interface while remaining free to swap concrete loggers.
   - `TraceLevel` (below debug)
   - `NoLevel` (emit entries without a severity when the backend supports it)
   - `Disabled`
+- Flexible output selection per adapter: console-style previews by default, or
+  fully structured JSON with `zerologger.NewStructured` / `Options{Structured:true}`.
 - Adapters for:
   - Charmbracelet [log](https://github.com/charmbracelet/log)
   - [phuslu/log](https://github.com/phuslu/log)
@@ -39,6 +41,10 @@ import (
 func main() {
     logger := zerologger.New(os.Stdout)
     logger.With("component", "worker").Info("ready", "addr", ":8080")
+
+    // Switch to JSON output if you'd rather stream structured logs.
+    jsonLogger := zerologger.NewStructured(os.Stdout)
+    jsonLogger.Info("ready", "component", "worker", "addr", ":8080")
 
     // Derive a debug logger without mutating the original.
     debug := logger.LogLevel(port.DebugLevel)

@@ -42,7 +42,8 @@ type Options struct {
 	DisableTimestamp bool
 
 	// Structured switches the adapter to structured (JSON) output instead of
-	// zerolog's console writer. ConfigureWriter is ignored when Structured is true.
+	// zerolog's console writer. When true, ConfigureWriter is ignored and the
+	// adapter emits zerolog JSON events directly.
 	Structured bool
 }
 
@@ -82,12 +83,13 @@ func (o *Options) UnmarshalJSON(data []byte) error {
 }
 
 // New returns a zerolog-backed ForLogging implementation with sensible
-// defaults that produce the familiar, colored console output.
+// defaults that produce zerolog's familiar colored console output.
 func New(w io.Writer) port.ForLogging {
 	return NewWithOptions(w, Options{})
 }
 
-// NewStructured returns a zerolog-backed ForLogging implementation with structured JSON output.
+// NewStructured returns a zerolog-backed ForLogging implementation that writes
+// structured JSON to the supplied writer.
 func NewStructured(w io.Writer) port.ForLogging {
 	return NewWithOptions(w, Options{Structured: true})
 }
@@ -96,8 +98,9 @@ func NewFromLogger(logger zerolog.Logger) port.ForLogging {
 	return adapter{logger: logger}
 }
 
-// NewWithOptions returns a zerolog-backed ForLogging implementation with the
-// supplied writer and options applied.
+// NewWithOptions returns a zerolog-backed ForLogging implementation using the
+// supplied writer and options. The default behaviour is console-friendly output;
+// set Options.Structured to true for JSON emission.
 func NewWithOptions(w io.Writer, o Options) port.ForLogging {
 	useConsole := !o.Structured
 	if useConsole {
