@@ -9,7 +9,7 @@ import (
 	"time"
 
 	onelogpkg "github.com/francoispqt/onelog"
-	port "github.com/sa6mwa/logport"
+	port "pkt.systems/logport"
 )
 
 func TestInfoProducesStructuredOutput(t *testing.T) {

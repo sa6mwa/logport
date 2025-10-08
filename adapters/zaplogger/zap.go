@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"strings"
 
-	port "github.com/sa6mwa/logport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	port "pkt.systems/logport"
 )
 
 type adapter struct {

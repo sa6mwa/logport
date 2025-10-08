@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/log"
-	port "github.com/sa6mwa/logport"
+	port "pkt.systems/logport"
 )
 
 func TestNewLogsMessageWithFields(t *testing.T) {

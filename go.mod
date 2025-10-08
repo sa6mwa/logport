@@ -1,4 +1,4 @@
-module github.com/sa6mwa/logport
+module pkt.systems/logport
 
 go 1.25.1
 

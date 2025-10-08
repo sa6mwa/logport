@@ -10,7 +10,7 @@ import (
 	"time"
 
 	onelogpkg "github.com/francoispqt/onelog"
-	port "github.com/sa6mwa/logport"
+	port "pkt.systems/logport"
 )
 
 // Options controls how the onelog adapter formats and filters log output.

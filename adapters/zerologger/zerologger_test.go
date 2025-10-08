@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	port "github.com/sa6mwa/logport"
+	port "pkt.systems/logport"
 )
 
 type customStringer struct{ value string }

@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 
 	plog "github.com/phuslu/log"
-	port "github.com/sa6mwa/logport"
+	port "pkt.systems/logport"
 )
 
 type Options struct {

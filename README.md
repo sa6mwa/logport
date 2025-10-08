@@ -37,9 +37,9 @@ package main
 import (
     "os"
 
-    port "github.com/sa6mwa/logport"
-    onelogger "github.com/sa6mwa/logport/adapters/onelogger"
-    "github.com/sa6mwa/logport/adapters/zerologger"
+    port "pkt.systems/logport"
+    onelogger "pkt.systems/logport/adapters/onelogger"
+    "pkt.systems/logport/adapters/zerologger"
 )
 
 func main() {

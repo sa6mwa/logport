@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
-	port "github.com/sa6mwa/logport"
+	port "pkt.systems/logport"
 )
 
 var (

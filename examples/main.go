@@ -8,12 +8,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/sa6mwa/logport"
-	"github.com/sa6mwa/logport/adapters/charmlogger"
-	"github.com/sa6mwa/logport/adapters/onelogger"
-	"github.com/sa6mwa/logport/adapters/phuslu"
-	"github.com/sa6mwa/logport/adapters/zaplogger"
-	"github.com/sa6mwa/logport/adapters/zerologger"
+	"pkt.systems/logport"
+	"pkt.systems/logport/adapters/charmlogger"
+	"pkt.systems/logport/adapters/onelogger"
+	"pkt.systems/logport/adapters/phuslu"
+	"pkt.systems/logport/adapters/zaplogger"
+	"pkt.systems/logport/adapters/zerologger"
 )
 
 func main() {

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	port "github.com/sa6mwa/logport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	port "pkt.systems/logport"
 )
 
 func testOptions() Options {
