@@ -234,6 +234,10 @@ func (a adapter) Tracef(format string, args ...any) {
 	a.Trace(formatMessage(format, args...))
 }
 
+func (a adapter) Write(p []byte) (int, error) {
+	return port.WriteToLogger(a, p)
+}
+
 func (a adapter) logEntry(entry *plog.Entry, msg string, keyvals []any) {
 	if entry == nil {
 		return

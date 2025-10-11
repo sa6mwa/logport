@@ -86,3 +86,78 @@ func TestNoopLoggerBehaviour(t *testing.T) {
 		t.Fatalf("expected WithGroup to return noop logger, got %T", handler)
 	}
 }
+
+func TestWriteToLoggerDetectsLevels(t *testing.T) {
+	rec := &recordingLogger{}
+	lines := []struct {
+		input string
+		level Level
+		msg   string
+	}{
+		{"INFO: ready", InfoLevel, "ready"},
+		{"warn - slow path", WarnLevel, "slow path"},
+		{"ERROR critical failure", ErrorLevel, "critical failure"},
+		{"[DEBUG] details", DebugLevel, "details"},
+		{"http: TLS handshake error from 1.2.3.4: remote error: tls: bad certificate", ErrorLevel, "from 1.2.3.4: remote error: tls: bad certificate"},
+		{"request failed with error code 42", ErrorLevel, "code 42"},
+		{"plain message", NoLevel, "plain message"},
+	}
+
+	for _, tc := range lines {
+		payload := tc.input + "\n"
+		if n, err := rec.Write([]byte(payload)); err != nil {
+			t.Fatalf("Write(%q) returned error %v", tc.input, err)
+		} else if n != len(payload) {
+			t.Fatalf("Write(%q) returned %d, want %d", tc.input, n, len(payload))
+		}
+	}
+
+	if len(rec.entries) != len(lines) {
+		t.Fatalf("expected %d entries, got %d", len(lines), len(rec.entries))
+	}
+
+	for i, tc := range lines {
+		entry := rec.entries[i]
+		if entry.level != tc.level {
+			t.Fatalf("entry %d level = %v, want %v", i, entry.level, tc.level)
+		}
+		if entry.msg != tc.msg {
+			t.Fatalf("entry %d msg = %q, want %q", i, entry.msg, tc.msg)
+		}
+	}
+}
+
+func TestLogLoggerUsesForLoggingWriter(t *testing.T) {
+	rec := &recordingLogger{}
+	std := LogLogger(rec)
+
+	std.Println("ERROR: boom")
+
+	if len(rec.entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(rec.entries))
+	}
+	if rec.entries[0].level != ErrorLevel {
+		t.Fatalf("expected ErrorLevel, got %v", rec.entries[0].level)
+	}
+	if rec.entries[0].msg != "boom" {
+		t.Fatalf("expected message %q, got %q", "boom", rec.entries[0].msg)
+	}
+}
+
+type logEntry struct {
+	level Level
+	msg   string
+}
+
+type recordingLogger struct {
+	noopLogger
+	entries []logEntry
+}
+
+func (r *recordingLogger) Logp(level Level, msg string, _ ...any) {
+	r.entries = append(r.entries, logEntry{level: level, msg: msg})
+}
+
+func (r *recordingLogger) Write(p []byte) (int, error) {
+	return WriteToLogger(r, p)
+}

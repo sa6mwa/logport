@@ -291,6 +291,10 @@ func (a adapter) Tracef(format string, args ...any) {
 	a.Trace(formatMessage(format, args...))
 }
 
+func (a adapter) Write(p []byte) (int, error) {
+	return port.WriteToLogger(a, p)
+}
+
 func appendUnique(parts []string, part string) []string {
 	for _, existing := range parts {
 		if existing == part {

@@ -217,6 +217,10 @@ func (a adapter) Trace(msg string, keyvals ...any) { a.log(port.TraceLevel, msg,
 
 func (a adapter) Tracef(format string, args ...any) { a.Trace(formatMessage(format, args...)) }
 
+func (a adapter) Write(p []byte) (int, error) {
+	return port.WriteToLogger(a, p)
+}
+
 func (a adapter) log(level port.Level, msg string, keyvals []any) {
 	if !a.shouldLog(level) {
 		return

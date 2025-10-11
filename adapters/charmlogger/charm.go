@@ -25,6 +25,15 @@ func New(w io.Writer) port.ForLogging {
 	})}
 }
 
+// NewStructured returns a charm-backed logger that emits JSON instead of text.
+func NewStructured(w io.Writer) port.ForLogging {
+	return charmAdapter{logger: log.NewWithOptions(w, log.Options{
+		TimeFormat:      time.RFC3339,
+		ReportTimestamp: true,
+		Formatter:       log.JSONFormatter,
+	})}
+}
+
 func NewWithOptions(w io.Writer, o log.Options) port.ForLogging {
 	return charmAdapter{logger: log.NewWithOptions(w, o)}
 }
@@ -219,6 +228,10 @@ func (c charmAdapter) Trace(msg string, keyvals ...any) {
 
 func (c charmAdapter) Tracef(format string, args ...any) {
 	c.Trace(formatMessage(format, args...))
+}
+
+func (c charmAdapter) Write(p []byte) (int, error) {
+	return port.WriteToLogger(c, p)
 }
 
 func (c charmAdapter) Enabled(_ context.Context, level slog.Level) bool {

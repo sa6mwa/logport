@@ -22,8 +22,11 @@
 package logport
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"log/slog"
 	"os"
 	"strings"
@@ -58,6 +61,7 @@ const (
 // for convenience when ergonomics matter more than throughput.
 type ForLogging interface {
 	slog.Handler
+	io.Writer
 
 	// LogLevelFromEnv configures the logger's level using the value of key in the
 	// environment. Recognised values are the same as ParseLevel. Missing or
@@ -91,14 +95,8 @@ type ForLogging interface {
 	// logport level.
 	Logf(level Level, format string, v ...any)
 
-	// Debug logs msg at DebugLevel.
-	Debug(msg string, keyvals ...any)
-	// Info logs msg at InfoLevel.
-	Info(msg string, keyvals ...any)
-	// Warn logs msg at WarnLevel.
-	Warn(msg string, keyvals ...any)
-	// Error logs msg at ErrorLevel.
-	Error(msg string, keyvals ...any)
+	ForLoggingMinimalSubset
+
 	// Fatal logs msg at FatalLevel and terminates the process when the backend
 	// supports it.
 	Fatal(msg string, keyvals ...any)
@@ -121,6 +119,17 @@ type ForLogging interface {
 	Panicf(format string, v ...any)
 	// Tracef logs a formatted message at TraceLevel.
 	Tracef(format string, v ...any)
+}
+
+type ForLoggingMinimalSubset interface {
+	// Debug logs msg at DebugLevel.
+	Debug(msg string, keyvals ...any)
+	// Info logs msg at InfoLevel.
+	Info(msg string, keyvals ...any)
+	// Warn logs msg at WarnLevel.
+	Warn(msg string, keyvals ...any)
+	// Error logs msg at ErrorLevel.
+	Error(msg string, keyvals ...any)
 }
 
 var DTGTimeFormat string = "021504"
@@ -146,6 +155,47 @@ func LoggerFromContext(ctx context.Context) ForLogging {
 		return logger
 	}
 	return noopLogger{}
+}
+
+// LogLogger wraps a ForLogging implementation into a stdlib *log.Logger.
+func LogLogger(logger ForLogging) *log.Logger {
+	if logger == nil {
+		logger = noopLogger{}
+	}
+	return log.New(logger, "", 0)
+}
+
+// WriteToLogger routes bytes to logger.Logp, splitting on newlines and
+// detecting severity prefixes. It always reports len(p) to comply with
+// io.Writer semantics.
+func WriteToLogger(logger ForLogging, p []byte) (int, error) {
+	if logger == nil || len(p) == 0 {
+		return len(p), nil
+	}
+	total := len(p)
+	rest := p
+	for len(rest) > 0 {
+		line := rest
+		if idx := bytes.IndexByte(line, '\n'); idx >= 0 {
+			line = line[:idx]
+			rest = rest[idx+1:]
+		} else {
+			rest = nil
+		}
+		raw := strings.TrimRight(string(line), "\r")
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		level, msg := classifyLogLine(raw)
+		if msg == "" {
+			msg = strings.TrimSpace(raw)
+		}
+		if msg == "" {
+			continue
+		}
+		logger.Logp(level, msg)
+	}
+	return total, nil
 }
 
 // NoopLogger provides a logger implementation that discards all log messages.
@@ -177,6 +227,7 @@ func (noopLogger) Panic(msg string, keyvals ...any)                { panic(msg) 
 func (noopLogger) Panicf(format string, v ...any)                  { panic(fmt.Sprintf(format, v...)) }
 func (noopLogger) Trace(msg string, keyvals ...any)                {}
 func (noopLogger) Tracef(string, ...any)                           {}
+func (noopLogger) Write(p []byte) (int, error)                     { return len(p), nil }
 
 func (noopLogger) Enabled(context.Context, slog.Level) bool  { return false }
 func (noopLogger) Handle(context.Context, slog.Record) error { return nil }

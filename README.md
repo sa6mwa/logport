@@ -64,6 +64,32 @@ func main() {
 }
 ```
 
+### Stdlib compatibility
+
+`ForLogging` now satisfies `io.Writer`, so any adapter can plug into helpers
+that expect a writer—including the standard library's `log.Logger`. Use
+`logport.LogLogger(forLogging)` to obtain a prefix-free `*log.Logger` that
+funnels calls back through the adapter, keeping legacy packages on the same
+output pipeline as your structured logs.
+
+Writes are classified with inexpensive heuristics: leading tags such as
+`[ERROR]`, `INFO:`, `warn -` and similar formats are stripped and remapped to
+the appropriate severity, while lines that merely contain the word `error`
+fall back to `ErrorLevel`. Messages that fail to match any hint are treated as
+`NoLevel`, allowing adapters to decide whether to emit or drop them based on
+their configured thresholds.
+
+### Minimal subsets
+
+The top-level `ForLogging` interface now embeds `ForLoggingMinimalSubset`, a
+four-method contract (`Debug`, `Info`, `Warn`, `Error`) that mirrors what many
+ecosystems—including Temporal's Go SDK—expect from a logger. When you only need
+basic levelled logging for an integration, depend on the minimal subset: every
+logport adapter (and `ForLogging` implementation) satisfies it automatically,
+while third-party implementations can provide just those methods and still plug
+into code that understands logport semantics. Additional subsets can grow over
+time without forcing downstream consumers to depend on the full interface.
+
 ### Runtime level control
 
 `LogLevelFromEnv` recognises the following (case insensitive) values: `trace`,
@@ -112,6 +138,9 @@ untouched so you can fan out per-component loggers easily.
 - **zerologger** – pass `Options{Structured: true}` or call `NewStructured` for
   raw JSON logs, and `Options{DisableTimestamp: true}` to leave the timestamp
   out altogether.
+- **charmlogger** – choose `New` for colourful console output or
+  `NewStructured` to switch the adapter to JSON (`log.JSONFormatter`) while
+  keeping the same timestamp defaults.
 - **zaplogger** – the adapter tracks the configured level so
   `WithLogLevel()` reflects the active zap core even after calling
   `LogLevelFromEnv` or chaining additional `With(...)` calls.
@@ -129,6 +158,64 @@ underlying logger’s expectations.
 workflows. Adapters remain `slog.Handler`s, letting you bridge between the port
 and Go’s structured logging ecosystem.
 
+## Benchmarks
+
+Benchmarks were gathered on my machine (13th Gen Intel® Core™ i7-1355U) using
+Go 1.25.1 with `go test -run=^$ -bench BenchmarkAdapter -benchmem -benchtime=50ms`.
+Numbers are indicative rather than absolute—they include the adapters’ own
+formatting costs.
+
+### Direct adapter calls (`logger.Info`/`Error`)
+
+| Adapter         | Info ns/op | B/op | allocs/op |
+|-----------------|------------|------|-----------|
+| charm/json      | 29.29      | 16   | 1         |
+| charm/console   | 33.36      | 16   | 1         |
+| phuslu          | 89.70      | 0    | 0         |
+| zerolog/json    | 171.50     | 0    | 0         |
+| onelog          | 214.60     | 8    | 1         |
+| zap             | 274.40     | 0    | 0         |
+| zerolog/console | 3240.00    | 1642 | 31        |
+
+Error-level calls track the same ordering within a few nanoseconds of the
+`Info` numbers. Charmbracelet/log now ships both text (`New`) and JSON
+(`NewStructured`) helpers; the JSON formatter is the fastest path but still
+allocates a small buffer per call. phuslu/log avoids allocations entirely while
+remaining sub-100 ns. Zerolog’s structured (`NewStructured`) mode is competitive
+with other JSON emitters, whereas the console formatter naturally takes longer
+because it renders colorized human output.
+
+### `log.Logger` compatibility path (`logport.LogLogger`)
+
+| Adapter         | `[INFO]` ns/op (B/op, allocs) | no-match ns/op (B/op, allocs) | substring `error` ns/op (B/op, allocs) |
+|-----------------|------------------------------|--------------------------------|----------------------------------------|
+| charm/console   | 226.8 (96, 4)                | 310.1 (96, 4)                  | 334.4 (112, 4)                         |
+| charm/json      | 301.8 (96, 4)                | 276.0 (96, 4)                  | 348.5 (112, 4)                         |
+| phuslu          | 281.8 (96, 3)                | 320.0 (96, 3)                  | 403.0 (112, 3)                         |
+| zerolog/json    | 483.6 (176, 3)               | 541.2 (176, 3)                 | 485.9 (192, 3)                         |
+| zap             | 504.0 (80, 3)                | 231.3 (80, 3)                  | 594.4 (96, 3)                          |
+| onelog          | 466.3 (120, 4)               | 466.6 (112, 4)                 | 620.5 (136, 4)                         |
+| zerolog/console | 3646.0 (1787, 34)            | 3737.0 (1691, 26)              | 4092.0 (1820, 34)                      |
+
+The stdlib bridge adds ~220–350 ns for the Go-based adapters (charmbracelet and
+phuslu) and roughly half a microsecond for the structured JSON emitters.
+Zerolog’s structured mode stays in the same band as zap and onelog, while the
+console writer remains several microseconds because it renders human-friendly
+output with formatting. Entries that fall back to `NoLevel` (e.g., “plain
+telemetry line”) are subject to the adapter’s minimum level; zap keeps its
+default `Info` threshold and drops them, explaining the faster no-match timing.
+
+Choose the adapter that matches your output requirements: charmbracelet/log now
+offers both console and JSON helpers, phuslu/log balances speed with zero
+allocations, zerolog’s structured mode is competitive for JSON workflows while
+its console mode prioritises aesthetics, and zap/onelog provide structured
+output with mature ecosystems.
+
+> **Note:** onelog’s raw benchmarks focus on its minimal API. The adapter adds
+> port features (`With`, level coercion, timestamp hooks) so the figures above
+> include that glue. Disable the timestamp hook via `Options{DisableTimestamp: true}`
+> or avoid `With` for absolute minimalism.
+
 ## Testing
 
 Run the full suite with:
@@ -138,5 +225,5 @@ go test ./...
 ```
 
 Adapter-specific tests assert `NoLevel` behaviour, `LogLevel` chaining,
-environment-driven level changes, and the additional helper methods to prevent
-regressions.
+environment-driven level changes, compatibility with `log.Logger`, and the
+additional helper methods to prevent regressions.

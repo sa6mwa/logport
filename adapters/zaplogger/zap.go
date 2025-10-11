@@ -276,6 +276,10 @@ func (a adapter) Tracef(format string, args ...any) {
 	a.Trace(formatMessage(format, args...))
 }
 
+func (a adapter) Write(p []byte) (int, error) {
+	return port.WriteToLogger(a, p)
+}
+
 func (a adapter) Enabled(_ context.Context, level slog.Level) bool {
 	if a.logger == nil {
 		return false
