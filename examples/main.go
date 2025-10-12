@@ -142,8 +142,9 @@ func main() {
 		Mode:       psl.ModeStructured,
 		TimeFormat: time.RFC3339,
 		ColorJSON:  true,
+		UTC:        true,
 	}
 	logger = psl.NewWithOptions(os.Stdout, popts).With("adapter", "psl")
-	logger.Info("hello")
+	logger.Info("This is in UTC")
 
 }

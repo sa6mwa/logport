@@ -108,7 +108,7 @@ func NewWithOptions(w io.Writer, opts Options) port.ForLogging {
 	discard := isDiscardWriter(w)
 	var cache *timeCache
 	if useCache {
-		cache = &timeCache{layout: timeFormat, utc: opts.UTC}
+		cache = newTimeCache(timeFormat, opts.UTC)
 	}
 
 	return adapter{
@@ -194,40 +194,87 @@ var cacheableLayouts = map[string]struct{}{
 }
 
 type timeCache struct {
-	layout string
-	utc    bool
-	once   sync.Once
-	value  atomic.Value
+	layout    string
+	utc       bool
+	once      sync.Once
+	value     atomic.Value
+	now       func() time.Time
+	newTicker func(time.Duration) tickerControl
+}
+
+type tickerControl struct {
+	C    <-chan time.Time
+	Stop func()
+}
+
+func (t tickerControl) stop() {
+	if t.Stop != nil {
+		t.Stop()
+	}
+}
+
+func newTimeCache(layout string, utc bool) *timeCache {
+	return &timeCache{
+		layout:    layout,
+		utc:       utc,
+		now:       time.Now,
+		newTicker: defaultTicker,
+	}
+}
+
+func defaultTicker(d time.Duration) tickerControl {
+	t := time.NewTicker(d)
+	return tickerControl{
+		C:    t.C,
+		Stop: t.Stop,
+	}
 }
 
 func (c *timeCache) Current() string {
 	c.once.Do(func() {
-		now := time.Now()
-		if c.utc {
-			now = now.UTC()
-		}
+		now := c.nowTime()
 		c.value.Store(now.Format(c.layout))
 		go c.refresh()
 	})
 	if v := c.value.Load(); v != nil {
 		return v.(string)
 	}
-	now := time.Now()
-	if c.utc {
-		now = now.UTC()
-	}
-	return now.Format(c.layout)
+	return c.nowTime().Format(c.layout)
 }
 
 func (c *timeCache) refresh() {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	ticker := c.makeTicker(time.Second)
+	if ticker.C == nil {
+		return
+	}
+	defer ticker.stop()
 	for now := range ticker.C {
 		if c.utc {
 			now = now.UTC()
 		}
 		c.value.Store(now.Format(c.layout))
 	}
+}
+
+func (c *timeCache) nowTime() time.Time {
+	nowFunc := c.now
+	if nowFunc == nil {
+		nowFunc = time.Now
+	}
+	now := nowFunc()
+	if c.utc {
+		return now.UTC()
+	}
+	return now
+}
+
+func (c *timeCache) makeTicker(d time.Duration) tickerControl {
+	if c.newTicker != nil {
+		if ticker := c.newTicker(d); ticker.C != nil {
+			return ticker
+		}
+	}
+	return defaultTicker(d)
 }
 
 func (a adapter) LogLevel(level port.Level) port.ForLogging {
