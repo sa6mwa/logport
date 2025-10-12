@@ -144,6 +144,31 @@ func TestLogLoggerUsesForLoggingWriter(t *testing.T) {
 	}
 }
 
+func TestLogLoggerWithLevelPinsSeverity(t *testing.T) {
+	t.Helper()
+
+	rec := &recordingLogger{}
+	std := LogLoggerWithLevel(rec, ErrorLevel)
+
+	std.Println("INFO something noisy")
+	std.Println("[WARN] be careful")
+
+	if len(rec.entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(rec.entries))
+	}
+	for i, entry := range rec.entries {
+		if entry.level != ErrorLevel {
+			t.Fatalf("entry %d level = %v, want %v", i, entry.level, ErrorLevel)
+		}
+	}
+	if rec.entries[0].msg != "something noisy" {
+		t.Fatalf("first message = %q, want %q", rec.entries[0].msg, "something noisy")
+	}
+	if rec.entries[1].msg != "be careful" {
+		t.Fatalf("second message = %q, want %q", rec.entries[1].msg, "be careful")
+	}
+}
+
 type logEntry struct {
 	level Level
 	msg   string

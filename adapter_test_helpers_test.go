@@ -7,6 +7,8 @@ import (
 	charm "pkt.systems/logport/adapters/charmlogger"
 	onelog "pkt.systems/logport/adapters/onelogger"
 	phuslu "pkt.systems/logport/adapters/phuslu"
+	psladapter "pkt.systems/logport/adapters/psl"
+	slogadapter "pkt.systems/logport/adapters/slogger"
 	zapadapter "pkt.systems/logport/adapters/zaplogger"
 	zeroadapter "pkt.systems/logport/adapters/zerologger"
 )
@@ -22,6 +24,10 @@ func adapterFactories() []adapterFactory {
 		{name: "zerolog/json", make: func(w io.Writer) logport.ForLogging { return zeroadapter.NewStructured(w) }},
 		{name: "charm/console", make: func(w io.Writer) logport.ForLogging { return charm.New(w) }},
 		{name: "charm/json", make: func(w io.Writer) logport.ForLogging { return charm.NewStructured(w) }},
+		{name: "slog/text", make: func(w io.Writer) logport.ForLogging { return slogadapter.New(w) }},
+		{name: "slog/json", make: func(w io.Writer) logport.ForLogging { return slogadapter.NewJSON(w) }},
+		{name: "psl/console", make: func(w io.Writer) logport.ForLogging { return psladapter.New(w) }},
+		{name: "psl/json", make: func(w io.Writer) logport.ForLogging { return psladapter.NewStructured(w) }},
 		{name: "phuslu", make: func(w io.Writer) logport.ForLogging { return phuslu.New(w) }},
 		{name: "zap", make: func(w io.Writer) logport.ForLogging { return zapadapter.New(w) }},
 		{name: "onelog", make: func(w io.Writer) logport.ForLogging { return onelog.New(w) }},

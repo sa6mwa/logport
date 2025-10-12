@@ -4,6 +4,49 @@
 popular logging back ends so that applications can depend on a single
 capability-rich interface while remaining free to swap concrete loggers.
 
+### Why logport?
+
+Logport aims to be the “do everything” façade you reach for when the
+application—not the logging backend—should dictate ergonomics. You won’t find
+another Go project that combines a feature-rich interface *and* a native,
+low-latency adapter in the same package; existing façades (go-kit/kit/log,
+logr) keep their surface intentionally tiny, while high-performance libraries
+(zerolog, onelog, phuslu/log, zap) expose their own APIs. Logport lets you keep
+the richer façade and still swap between those back ends as needed.
+
+- **Interface surface.** Lightweight emitters like onelog, zerolog, and
+  phuslu/log are legendary for speed, but they expose narrowly scoped APIs.
+  logport layers key/value helpers, printf fallbacks, environment-driven level
+  promotion, slog handler compatibility, context propagation, minimal subsets,
+  and a `log.Logger` bridge on top of any backend. Zap and charm/log offer rich
+  features too, yet they expect you to program directly against their handler
+  models. With logport you get the richer façade while retaining the freedom to
+  swap concrete loggers per deployment or per integration.
+- **Performance in practice.** The native PSL adapter keeps the façade honest:
+  console output with timestamps lands around **40 ns/op**, and dropping
+  timestamps pushes it to the low 30 ns band—close to onelog and
+  phuslu/log despite PSL’s extra conveniences (colour-aware console output,
+  json/console dual mode, UTC toggles, short vs. verbose JSON fields).
+  Structured PSL output stays allocation-free and remains competitive even
+  after we add RFC3339 timestamps—something many micro-loggers leave out by
+  default.
+- **Adapter breadth.** Need zerolog to feed structured ingestion, zap for
+  ecosystem tooling, slog for standard-library integrations, or charm/log for a
+  developer-friendly console? logport ships adapters for each, so the interface
+  you code against stays unchanged. Benchmarks in this document use the same
+  sink and timestamp policy across adapters precisely so you can compare them on
+  equal footing.
+- **Transparent trade-offs.** logport deliberately avoids areas already handled
+  well by specialised libraries: log file rotation, sampling/rate limiting,
+  metrics emission, dynamic configuration backplanes. You can still obtain those
+  by selecting an adapter that supports them (e.g., zap’s sampling, phuslu’s
+  rolling writers) or by composing logport with external sinks. The façade
+  keeps you decoupled from those choices.
+
+If you need a unified, feature-rich interface without giving up the ability to
+leverage the fastest emitters in the Go ecosystem, logport plus its PSL adapter
+is designed to sit in that sweet spot.
+
 ## Highlights
 
 - Uniform interface with structured logging support via `With`, `WithGroup`, and
@@ -28,6 +71,8 @@ capability-rich interface while remaining free to swap concrete loggers.
   - [rs/zerolog](https://github.com/rs/zerolog)
   - [francoispqt/onelog](https://github.com/francoispqt/onelog)
   - [go.uber.org/zap](https://github.com/uber-go/zap)
+  - Go's standard [`log/slog`](https://pkg.go.dev/log/slog)
+  - Native high-performance `psl` adapter for console and JSON output
 
 ## Quick Start
 
@@ -35,23 +80,44 @@ capability-rich interface while remaining free to swap concrete loggers.
 package main
 
 import (
+    "context"
+    "net/http"
     "os"
 
     port "pkt.systems/logport"
+    psl "pkt.systems/logport/adapters/psl"
+    charmlogger "pkt.systems/logport/adapters/charmlogger"
     onelogger "pkt.systems/logport/adapters/onelogger"
-    "pkt.systems/logport/adapters/zerologger"
 )
 
 func main() {
-    logger := zerologger.New(os.Stdout)
+    // Native PSL: console output with cached timestamps and colour when terminal-aware.
+    logger := psl.New(os.Stderr)
     logger.With("component", "worker").Info("ready", "addr", ":8080")
 
-    // Switch to JSON output if you'd rather stream structured logs.
-    jsonLogger := zerologger.NewStructured(os.Stdout)
-    jsonLogger.Info("ready", "component", "worker", "addr", ":8080")
+    // Switch PSL to structured JSON while keeping zero allocations.
+    jsonLogger := psl.NewStructured(os.Stderr).With("component", "worker").WithLogLevel()
+    jsonLogger.Info("ready", "addr", ":8080")
+
+    // Propagate PSL via context and retrieve it down the call stack.
+    ctx := port.ContextWithLogger(context.Background(), psl.New(os.Stderr))
+    doWork(ctx)
+
+    // Wrap PSL in a stdlib *log.Logger for legacy integrations.
+    std := port.LogLogger(psl.New(os.Stderr))
+    std.Println("legacy library ready")
+
+    // Pin net/http's ErrorLog to ErrorLevel while still stripping prefixes.
+    httpErr := port.LogLoggerWithLevel(psl.New(os.Stderr), port.ErrorLevel)
+    srv := &http.Server{Addr: ":8080", ErrorLog: httpErr}
+    go srv.ListenAndServe()
+
+    // Drop in another backend (charmbracelet/log) without changing call sites.
+    charm := charmlogger.New(os.Stderr)
+    charm.With("component", "worker").Warn("slow response", "duration", "120ms")
 
     // Pick onelog when you want lean JSON with minimal allocation overhead.
-    minimal := onelogger.New(os.Stdout)
+    minimal := onelogger.New(os.Stderr)
     minimal.Info("ready", "component", "worker")
 
     // Derive a debug logger without mutating the original.
@@ -62,6 +128,11 @@ func main() {
     runtimeLogger := logger.LogLevelFromEnv("APP_LOG_LEVEL").WithLogLevel()
     runtimeLogger.Info("running", "pid", os.Getpid())
 }
+
+func doWork(ctx context.Context) {
+    log := port.LoggerFromContext(ctx)
+    log.Info("processing", "job", 42)
+}
 ```
 
 ### Stdlib compatibility
@@ -70,7 +141,10 @@ func main() {
 that expect a writer—including the standard library's `log.Logger`. Use
 `logport.LogLogger(forLogging)` to obtain a prefix-free `*log.Logger` that
 funnels calls back through the adapter, keeping legacy packages on the same
-output pipeline as your structured logs.
+output pipeline as your structured logs. When the legacy integration represents
+exactly one severity—`net/http.Server.ErrorLog` is a common example—wrap via
+`logport.LogLoggerWithLevel(forLogging, logport.ErrorLevel)` to pin every write
+to a specific level while still stripping redundant prefixes from the message.
 
 Writes are classified with inexpensive heuristics: leading tags such as
 `[ERROR]`, `INFO:`, `warn -` and similar formats are stripped and remapped to
@@ -138,9 +212,20 @@ untouched so you can fan out per-component loggers easily.
 - **zerologger** – pass `Options{Structured: true}` or call `NewStructured` for
   raw JSON logs, and `Options{DisableTimestamp: true}` to leave the timestamp
   out altogether.
+- **slogger** – use `New` for text output, `NewJSON` for structured logs, or
+  `NewWithHandler` / `NewWithLogger` when you already have a custom slog
+  handler configured elsewhere.
 - **charmlogger** – choose `New` for colourful console output or
   `NewStructured` to switch the adapter to JSON (`log.JSONFormatter`) while
   keeping the same timestamp defaults.
+- **psl** – a native console/JSON adapter modelled on zerolog's appearance with
+  terminal-aware colour, no allocations on the hot path, cached timestamps (now
+  covering the built-in Go layouts, including `time.DateTime` and
+  `port.DTGTimeFormat`), and optional colourful JSON output (`Options{ColorJSON: true}`)
+  that only engages when the destination is a TTY. Toggle `Options{VerboseFields: true}`
+  to expand JSON keys from `ts/lvl/msg` to `time/level/message`, set
+  `Options{UTC: true}` to force UTC timestamps, and note that the adapter now
+  mirrors charm’s optimisation by short-circuiting when pointed at `io.Discard`.
 - **zaplogger** – the adapter tracks the configured level so
   `WithLogLevel()` reflects the active zap core even after calling
   `LogLevelFromEnv` or chaining additional `With(...)` calls.
@@ -161,60 +246,105 @@ and Go’s structured logging ecosystem.
 ## Benchmarks
 
 Benchmarks were gathered on my machine (13th Gen Intel® Core™ i7-1355U) using
-Go 1.25.1 with `go test -run=^$ -bench BenchmarkAdapter -benchmem -benchtime=50ms`.
-Numbers are indicative rather than absolute—they include the adapters’ own
-formatting costs.
+Go 1.25.1. Every run writes to a locked sink that mimics container stdout/stderr
+instead of `io.Discard`, so the numbers account for both formatter work and the
+small amount of synchronisation you get in typical deployment environments.
+After adding structured JSON fuzz tests to PSL (to guarantee escaping under
+arbitrary inputs) we reran the suite; the figures below remain within normal
+variance of previous runs.
 
-### Direct adapter calls (`logger.Info`/`Error`)
+### Through the logport adapters (`logger.Info`)
+
+`go test -run=^$ -bench BenchmarkAdapterInfo -benchmem -benchtime=50ms`
 
 | Adapter         | Info ns/op | B/op | allocs/op |
 |-----------------|------------|------|-----------|
-| charm/json      | 29.29      | 16   | 1         |
-| charm/console   | 33.36      | 16   | 1         |
-| phuslu          | 89.70      | 0    | 0         |
-| zerolog/json    | 171.50     | 0    | 0         |
-| onelog          | 214.60     | 8    | 1         |
-| zap             | 274.40     | 0    | 0         |
-| zerolog/console | 3240.00    | 1642 | 31        |
+| psl/console     | 39.9       | 0    | 0         |
+| psl/json        | 59.8       | 0    | 0         |
+| phuslu          | 80.0       | 0    | 0         |
+| zerolog/json    | 138.0      | 0    | 0         |
+| onelog          | 181.0      | 24   | 1         |
+| zap             | 266.0      | 0    | 0         |
+| slog/json       | 399.0      | 0    | 0         |
+| slog/text       | 421.0      | 0    | 0         |
+| charm/json      | 1100.0     | 419  | 16        |
+| charm/console   | 2630.0     | 432  | 16        |
+| zerolog/console | 3240.0     | 1658 | 31        |
 
-Error-level calls track the same ordering within a few nanoseconds of the
-`Info` numbers. Charmbracelet/log now ships both text (`New`) and JSON
-(`NewStructured`) helpers; the JSON formatter is the fastest path but still
-allocates a small buffer per call. phuslu/log avoids allocations entirely while
-remaining sub-100 ns. Zerolog’s structured (`NewStructured`) mode is competitive
-with other JSON emitters, whereas the console formatter naturally takes longer
-because it renders colorized human output.
+**What drives the gaps?**
 
-### `log.Logger` compatibility path (`logport.LogLogger`)
+- **Timestamp policy:** PSL caches formatted timestamps when they’re enabled
+  (`timeCache.Current()`), so the console hot path is just an atomic load plus a
+  pre-baked DTG append. Disabling timestamps removes even that cost, trimming a
+  few extra nanoseconds. Onelog ships with no timestamp, so we add one with a
+  hook in this benchmark; the ~181 ns/op reflects that extra RFC3339 work. The
+  no-timestamp suite below shows onelog back near 40 ns/op when the hook is
+  removed.
+- **Formatter complexity:** Console loggers spend real time producing human
+  output. Charmbracelet/log renders styled strings and colour sequences; even
+  with a mutex-bound sink it sits in the low microseconds. Zerolog’s console
+  writer is similarly deliberate, so it remains multiple microseconds slower
+  than the JSON emitters.
+- **Allocations:** All of PSL’s paths stay allocation-free thanks to pooled
+  buffers. Onelog’s adapter still allocates when it marshals via its hook, and
+  charm/zerolog console allocate because they rebuild the formatted line for
+  every write. The new kitlog/logr entries highlight how general-purpose
+  façades pay for additional wrappers (hundreds of bytes per log event) even
+  before formatting complexity kicks in.
 
-| Adapter         | `[INFO]` ns/op (B/op, allocs) | no-match ns/op (B/op, allocs) | substring `error` ns/op (B/op, allocs) |
-|-----------------|------------------------------|--------------------------------|----------------------------------------|
-| charm/console   | 226.8 (96, 4)                | 310.1 (96, 4)                  | 334.4 (112, 4)                         |
-| charm/json      | 301.8 (96, 4)                | 276.0 (96, 4)                  | 348.5 (112, 4)                         |
-| phuslu          | 281.8 (96, 3)                | 320.0 (96, 3)                  | 403.0 (112, 3)                         |
-| zerolog/json    | 483.6 (176, 3)               | 541.2 (176, 3)                 | 485.9 (192, 3)                         |
-| zap             | 504.0 (80, 3)                | 231.3 (80, 3)                  | 594.4 (96, 3)                          |
-| onelog          | 466.3 (120, 4)               | 466.6 (112, 4)                 | 620.5 (136, 4)                         |
-| zerolog/console | 3646.0 (1787, 34)            | 3737.0 (1691, 26)              | 4092.0 (1820, 34)                      |
+### Native APIs (outside logport)
 
-The stdlib bridge adds ~220–350 ns for the Go-based adapters (charmbracelet and
-phuslu) and roughly half a microsecond for the structured JSON emitters.
-Zerolog’s structured mode stays in the same band as zap and onelog, while the
-console writer remains several microseconds because it renders human-friendly
-output with formatting. Entries that fall back to `NoLevel` (e.g., “plain
-telemetry line”) are subject to the adapter’s minimum level; zap keeps its
-default `Info` threshold and drops them, explaining the faster no-match timing.
+`go test -run=^$ -bench BenchmarkNativeLoggerInfo -benchmem -benchtime=50ms`
 
-Choose the adapter that matches your output requirements: charmbracelet/log now
-offers both console and JSON helpers, phuslu/log balances speed with zero
-allocations, zerolog’s structured mode is competitive for JSON workflows while
-its console mode prioritises aesthetics, and zap/onelog provide structured
-output with mature ecosystems.
+| Logger/API        | Info ns/op | B/op | allocs/op |
+|-------------------|------------|------|-----------|
+| psl console       | 35.4       | 0    | 0         |
+| psl JSON          | 58.5       | 0    | 0         |
+| phuslu/log JSON   | 76.8       | 0    | 0         |
+| zerolog JSON      | 140.0      | 0    | 0         |
+| onelog JSON       | 143.4      | 24   | 1         |
+| zap JSON          | 268.0      | 0    | 0         |
+| slog JSON         | 374.3      | 0    | 0         |
+| kitlog/json       | 1327.0     | 816  | 13        |
+| logr/funcr        | 1473.0     | 1360 | 9         |
+| charm/log console | 2906.0     | 432  | 16        |
+| charm/log JSON    | 1272.0     | 419  | 16        |
+| zerolog console   | 2828.0     | 1658 | 31        |
 
-> **Note:** onelog’s raw benchmarks focus on its minimal API. The adapter adds
-> port features (`With`, level coercion, timestamp hooks) so the figures above
-> include that glue. Disable the timestamp hook via `Options{DisableTimestamp: true}`
-> or avoid `With` for absolute minimalism.
+These figures reflect each library’s preferred entry point (e.g.,
+`logger.Info().Msg`, `zap.New(core).Info`). Once the discard fast-path is out of
+the picture, PSL’s native console stack sits alongside onelog/phuslu in the
+sub-100 ns bracket, while the console-focused libraries spend microseconds on
+deliberate formatting work.
+
+`BenchmarkNativeLoggerInfoNoTimestamp` disables timestamps wherever the library
+allows it (PSL, zerolog, charm, zap, slog, onelog). phuslu/log currently lacks a
+clean switch for removing the time field, so it is skipped in that variant.
+
+| Logger/API (no ts) | Info ns/op | B/op | allocs/op |
+|--------------------|------------|------|-----------|
+| onelog JSON        | 42.1       | 0    | 0         |
+| psl console        | 34.2       | 0    | 0         |
+| psl JSON           | 50.2       | 0    | 0         |
+| zerolog JSON       | 68.7       | 0    | 0         |
+| zap JSON           | 193.9      | 0    | 0         |
+| slog JSON          | 766.9      | 120  | 3         |
+| kitlog/json        | 738.4      | 576  | 9         |
+| logr/funcr         | 763.0      | 1248 | 6         |
+| charm/log console  | 2038.0     | 264  | 13        |
+| charm/log JSON     | 779.7      | 218  | 11        |
+| zerolog console    | 2914.0     | 1514 | 26        |
+
+These figures reflect each library’s preferred entry point (e.g.,
+`logger.Info().Msg`, `zap.New(core).Info`). Once the discard fast-path is out of
+the picture, PSL’s native console stack sits alongside onelog/phuslu in the
+sub-100 ns bracket, while console-focused libraries spend microseconds on
+deliberate formatting work. The kitlog/logr rows show what happens when you
+layer additional abstraction on top of logging—useful for instrumentation, but
+costly when every nanosecond matters. The no-timestamp variant underlines how
+much of onelog’s cost is simply the added timestamp hook (42 ns vs. 143 ns),
+and how PSL’s cached timestamps keep the penalty minimal (~60 ns with
+timestamps, ~50 ns without).
 
 ## Testing
 

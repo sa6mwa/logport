@@ -12,6 +12,7 @@ import (
 	"pkt.systems/logport/adapters/charmlogger"
 	"pkt.systems/logport/adapters/onelogger"
 	"pkt.systems/logport/adapters/phuslu"
+	"pkt.systems/logport/adapters/psl"
 	"pkt.systems/logport/adapters/zaplogger"
 	"pkt.systems/logport/adapters/zerologger"
 )
@@ -126,5 +127,23 @@ func main() {
 	logger = logger.LogLevelFromEnv("EXAMPLE_LOG_LEVEL").With("LogLevelFromEnv", os.Getenv("EXAMPLE_LOG_LEVEL")).WithLogLevel()
 	logger.Info("This should not show")
 	logger.Warn("This should show")
+
+	logger = psl.New(os.Stdout).With("adapter", "psl").With("mode", "console")
+	logger.Info("Hello, this is logport's native adapter in console mode")
+	logger.Warn("This is a warning message")
+	logger.Error("This is an error message")
+
+	logger = psl.NewStructured(os.Stdout).With("adapter", "psl").With("mode", "structured").WithLogLevel().With("num", 123)
+	logger.Info("Hello, this is logport's native structured logger")
+	logger.Warn("This is a warning message")
+	logger.Error("This is an error")
+
+	popts := psl.Options{
+		Mode:       psl.ModeStructured,
+		TimeFormat: time.RFC3339,
+		ColorJSON:  true,
+	}
+	logger = psl.NewWithOptions(os.Stdout, popts).With("adapter", "psl")
+	logger.Info("hello")
 
 }

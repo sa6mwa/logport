@@ -1,4 +1,5 @@
 /.gocache
+/*.test
 coverage.out
 bin/
 \#*\#

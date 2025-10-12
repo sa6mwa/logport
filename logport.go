@@ -165,14 +165,49 @@ func LogLogger(logger ForLogging) *log.Logger {
 	return log.New(logger, "", 0)
 }
 
+// LogLoggerWithLevel wraps a ForLogging implementation into a stdlib
+// *log.Logger that pins every emitted entry to level. The wrapped logger still
+// benefits from prefix classification to strip level tokens from msg, but the
+// detected level is ignored in favour of the supplied one.
+func LogLoggerWithLevel(logger ForLogging, level Level) *log.Logger {
+	if logger == nil {
+		logger = noopLogger{}
+	}
+	return log.New(levelPinnedWriter{logger: logger, level: level}, "", 0)
+}
+
 // WriteToLogger routes bytes to logger.Logp, splitting on newlines and
 // detecting severity prefixes. It always reports len(p) to comply with
 // io.Writer semantics.
 func WriteToLogger(logger ForLogging, p []byte) (int, error) {
-	if logger == nil || len(p) == 0 {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if logger == nil {
 		return len(p), nil
 	}
-	total := len(p)
+	writeBytesToLogger(logger, p, nil)
+	return len(p), nil
+}
+
+type levelPinnedWriter struct {
+	logger ForLogging
+	level  Level
+}
+
+func (w levelPinnedWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if w.logger == nil {
+		return len(p), nil
+	}
+	level := w.level
+	writeBytesToLogger(w.logger, p, &level)
+	return len(p), nil
+}
+
+func writeBytesToLogger(logger ForLogging, p []byte, override *Level) {
 	rest := p
 	for len(rest) > 0 {
 		line := rest
@@ -187,6 +222,9 @@ func WriteToLogger(logger ForLogging, p []byte) (int, error) {
 			continue
 		}
 		level, msg := classifyLogLine(raw)
+		if override != nil {
+			level = *override
+		}
 		if msg == "" {
 			msg = strings.TrimSpace(raw)
 		}
@@ -195,7 +233,6 @@ func WriteToLogger(logger ForLogging, p []byte) (int, error) {
 		}
 		logger.Logp(level, msg)
 	}
-	return total, nil
 }
 
 // NoopLogger provides a logger implementation that discards all log messages.

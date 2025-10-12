@@ -1,0 +1,851 @@
+package psl
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	port "pkt.systems/logport"
+)
+
+type Mode int
+
+const (
+	ModeConsole Mode = iota
+	ModeStructured
+)
+
+type Options struct {
+	Mode             Mode
+	TimeFormat       string
+	DisableTimestamp bool
+	NoColor          bool
+	ColorJSON        bool
+	MinLevel         *port.Level
+	VerboseFields    bool
+}
+
+// New returns a psl console logger, for structured logging, use NewStructured
+// or NewWithOptions.
+func New(w io.Writer) port.ForLogging {
+	return NewWithOptions(w, Options{Mode: ModeConsole})
+}
+
+// NewStructured returns a psl structured logger with colorful json when on the
+// terminal (no color when output is not a terminal). Use NewStructuredNoColor
+// if you explicitly don't want colors (or use NewWithOptions to customize
+// further).
+func NewStructured(w io.Writer) port.ForLogging {
+	return NewWithOptions(w, Options{Mode: ModeStructured, ColorJSON: true})
+}
+
+// NewStructuredNoColor returns a psl structured logger w/o colorful json
+// regardless if on terminal or not.
+func NewStructuredNoColor(w io.Writer) port.ForLogging {
+	return NewWithOptions(w, Options{Mode: ModeStructured})
+}
+
+func NewWithOptions(w io.Writer, opts Options) port.ForLogging {
+	if w == nil {
+		w = io.Discard
+	}
+	mode := opts.Mode
+	if mode != ModeStructured {
+		mode = ModeConsole
+	}
+	minLevel := port.TraceLevel
+	if opts.MinLevel != nil {
+		minLevel = *opts.MinLevel
+	}
+
+	timeFormat := opts.TimeFormat
+	if timeFormat == "" {
+		if mode == ModeConsole {
+			timeFormat = port.DTGTimeFormat
+		} else {
+			timeFormat = time.RFC3339
+		}
+	}
+
+	noColor := opts.NoColor || !isTerminal(w) || os.Getenv("NO_COLOR") != ""
+	colorJSON := opts.ColorJSON && !noColor
+	useCache := !opts.DisableTimestamp && (timeFormat == time.Kitchen || timeFormat == time.RFC3339)
+	var cache *timeCache
+	if useCache {
+		cache = &timeCache{layout: timeFormat}
+	}
+
+	return adapter{
+		writer:           w,
+		mode:             mode,
+		timeFormat:       timeFormat,
+		colorEnabled:     !noColor,
+		colorJSONEnabled: colorJSON,
+		disableTimestamp: opts.DisableTimestamp,
+		minLevel:         minLevel,
+		verbose:          opts.VerboseFields,
+		timeCache:        cache,
+		useTimeCache:     useCache,
+	}
+}
+
+func ContextWithLogger(ctx context.Context, w io.Writer, opts Options) context.Context {
+	return port.ContextWithLogger(ctx, NewWithOptions(w, opts))
+}
+
+type adapter struct {
+	writer           io.Writer
+	mode             Mode
+	timeFormat       string
+	colorEnabled     bool
+	colorJSONEnabled bool
+	disableTimestamp bool
+	minLevel         port.Level
+	forcedLevel      *port.Level
+	baseFields       []kv
+	groups           []string
+	verbose          bool
+	timeCache        *timeCache
+	useTimeCache     bool
+}
+
+type kv struct {
+	key   string
+	value any
+}
+
+type scratch struct {
+	buf []byte
+}
+
+var scratchPool = sync.Pool{New: func() any { return &scratch{buf: make([]byte, 0, 256)} }}
+
+type timeCache struct {
+	layout string
+	once   sync.Once
+	value  atomic.Value
+}
+
+func (c *timeCache) Current() string {
+	c.once.Do(func() {
+		c.value.Store(time.Now().Format(c.layout))
+		go c.refresh()
+	})
+	if v := c.value.Load(); v != nil {
+		return v.(string)
+	}
+	return time.Now().Format(c.layout)
+}
+
+func (c *timeCache) refresh() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for now := range ticker.C {
+		c.value.Store(now.Format(c.layout))
+	}
+}
+
+func (a adapter) LogLevel(level port.Level) port.ForLogging {
+	if level == port.NoLevel {
+		lvl := level
+		return adapter{
+			writer:           a.writer,
+			mode:             a.mode,
+			timeFormat:       a.timeFormat,
+			colorEnabled:     a.colorEnabled,
+			colorJSONEnabled: a.colorJSONEnabled,
+			disableTimestamp: a.disableTimestamp,
+			minLevel:         a.minLevel,
+			forcedLevel:      &lvl,
+			baseFields:       cloneFields(a.baseFields),
+			groups:           cloneStrings(a.groups),
+			verbose:          a.verbose,
+			timeCache:        a.timeCache,
+			useTimeCache:     a.useTimeCache,
+		}
+	}
+	return adapter{
+		writer:           a.writer,
+		mode:             a.mode,
+		timeFormat:       a.timeFormat,
+		colorEnabled:     a.colorEnabled,
+		colorJSONEnabled: a.colorJSONEnabled,
+		disableTimestamp: a.disableTimestamp,
+		minLevel:         level,
+		baseFields:       cloneFields(a.baseFields),
+		groups:           cloneStrings(a.groups),
+		verbose:          a.verbose,
+		timeCache:        a.timeCache,
+		useTimeCache:     a.useTimeCache,
+	}
+}
+
+func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
+	if level, ok := port.LevelFromEnv(key); ok {
+		return a.LogLevel(level)
+	}
+	return a
+}
+
+func (a adapter) WithLogLevel() port.ForLogging {
+	return a.With("loglevel", port.LevelString(a.currentLevel()))
+}
+
+func (a adapter) With(keyvals ...any) port.ForLogging {
+	if len(keyvals) == 0 {
+		return a
+	}
+	fields := collectKeyvals(nil, keyvals, nil)
+	if len(fields) == 0 {
+		return a
+	}
+	combined := append(cloneFields(a.baseFields), fields...)
+	return adapter{
+		writer:           a.writer,
+		mode:             a.mode,
+		timeFormat:       a.timeFormat,
+		colorEnabled:     a.colorEnabled,
+		colorJSONEnabled: a.colorJSONEnabled,
+		disableTimestamp: a.disableTimestamp,
+		minLevel:         a.minLevel,
+		forcedLevel:      cloneLevel(a.forcedLevel),
+		baseFields:       combined,
+		groups:           cloneStrings(a.groups),
+		verbose:          a.verbose,
+		timeCache:        a.timeCache,
+		useTimeCache:     a.useTimeCache,
+	}
+}
+
+func (a adapter) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return a
+	}
+	groups := append(cloneStrings(a.groups), name)
+	return adapter{
+		writer:           a.writer,
+		mode:             a.mode,
+		timeFormat:       a.timeFormat,
+		colorEnabled:     a.colorEnabled,
+		colorJSONEnabled: a.colorJSONEnabled,
+		disableTimestamp: a.disableTimestamp,
+		minLevel:         a.minLevel,
+		forcedLevel:      cloneLevel(a.forcedLevel),
+		baseFields:       cloneFields(a.baseFields),
+		groups:           groups,
+		verbose:          a.verbose,
+		timeCache:        a.timeCache,
+		useTimeCache:     a.useTimeCache,
+	}
+}
+
+func (a adapter) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(attrs) == 0 {
+		return a
+	}
+	additional := collectAttrs(nil, attrs, a.groups)
+	combined := append(cloneFields(a.baseFields), additional...)
+	return adapter{
+		writer:           a.writer,
+		mode:             a.mode,
+		timeFormat:       a.timeFormat,
+		colorEnabled:     a.colorEnabled,
+		colorJSONEnabled: a.colorJSONEnabled,
+		disableTimestamp: a.disableTimestamp,
+		minLevel:         a.minLevel,
+		forcedLevel:      cloneLevel(a.forcedLevel),
+		baseFields:       combined,
+		groups:           cloneStrings(a.groups),
+		verbose:          a.verbose,
+		timeCache:        a.timeCache,
+		useTimeCache:     a.useTimeCache,
+	}
+}
+
+func (a adapter) Enabled(_ context.Context, level slog.Level) bool {
+	return a.shouldLog(port.LevelFromSlog(level))
+}
+
+func (a adapter) Handle(ctx context.Context, record slog.Record) error {
+	if !a.shouldLog(port.LevelFromSlog(record.Level)) {
+		return nil
+	}
+	keyvals := make([]any, 0, record.NumAttrs())
+	record.Attrs(func(attr slog.Attr) bool {
+		keyvals = append(keyvals, attr)
+		return true
+	})
+	a.logInternal(port.LevelFromSlog(record.Level), record.Message, ctx, keyvals...)
+	return nil
+}
+
+func (a adapter) Log(ctx context.Context, level slog.Level, msg string, keyvals ...any) {
+	a.logInternal(port.LevelFromSlog(level), msg, ctx, keyvals...)
+}
+
+func (a adapter) Logp(level port.Level, msg string, keyvals ...any) {
+	a.logInternal(level, msg, context.Background(), keyvals...)
+}
+
+func (a adapter) Logs(level string, msg string, keyvals ...any) {
+	if lvl, ok := port.ParseLevel(level); ok {
+		a.logInternal(lvl, msg, context.Background(), keyvals...)
+		return
+	}
+	a.logInternal(port.NoLevel, msg, context.Background(), keyvals...)
+}
+
+func (a adapter) Logf(level port.Level, format string, args ...any) {
+	a.logInternal(level, fmt.Sprintf(format, args...), context.Background())
+}
+
+func (a adapter) Debug(msg string, keyvals ...any) {
+	a.logInternal(port.DebugLevel, msg, context.Background(), keyvals...)
+}
+func (a adapter) Info(msg string, keyvals ...any) {
+	a.logInternal(port.InfoLevel, msg, context.Background(), keyvals...)
+}
+func (a adapter) Warn(msg string, keyvals ...any) {
+	a.logInternal(port.WarnLevel, msg, context.Background(), keyvals...)
+}
+func (a adapter) Error(msg string, keyvals ...any) {
+	a.logInternal(port.ErrorLevel, msg, context.Background(), keyvals...)
+}
+
+func (a adapter) Fatal(msg string, keyvals ...any) {
+	a.logInternal(port.FatalLevel, msg, context.Background(), keyvals...)
+	os.Exit(1)
+}
+
+func (a adapter) Panic(msg string, keyvals ...any) {
+	a.logInternal(port.PanicLevel, msg, context.Background(), keyvals...)
+	panic(msg)
+}
+
+func (a adapter) Trace(msg string, keyvals ...any) {
+	a.logInternal(port.TraceLevel, msg, context.Background(), keyvals...)
+}
+
+func (a adapter) Debugf(format string, args ...any) {
+	a.logInternal(port.DebugLevel, fmt.Sprintf(format, args...), context.Background())
+}
+func (a adapter) Infof(format string, args ...any) {
+	a.logInternal(port.InfoLevel, fmt.Sprintf(format, args...), context.Background())
+}
+func (a adapter) Warnf(format string, args ...any) {
+	a.logInternal(port.WarnLevel, fmt.Sprintf(format, args...), context.Background())
+}
+func (a adapter) Errorf(format string, args ...any) {
+	a.logInternal(port.ErrorLevel, fmt.Sprintf(format, args...), context.Background())
+}
+func (a adapter) Fatalf(format string, args ...any) { a.Fatal(fmt.Sprintf(format, args...)) }
+func (a adapter) Panicf(format string, args ...any) { a.Panic(fmt.Sprintf(format, args...)) }
+func (a adapter) Tracef(format string, args ...any) {
+	a.logInternal(port.TraceLevel, fmt.Sprintf(format, args...), context.Background())
+}
+
+func (a adapter) Write(p []byte) (int, error) {
+	return port.WriteToLogger(a, p)
+}
+
+func (a adapter) currentLevel() port.Level {
+	if a.forcedLevel != nil {
+		return *a.forcedLevel
+	}
+	return a.minLevel
+}
+
+func (a adapter) shouldLog(level port.Level) bool {
+	if a.writer == nil {
+		return false
+	}
+	effective := level
+	if a.forcedLevel != nil {
+		switch *a.forcedLevel {
+		case port.Disabled:
+			return false
+		case port.NoLevel:
+			effective = port.InfoLevel
+		default:
+			effective = *a.forcedLevel
+		}
+	}
+	if effective == port.Disabled {
+		return false
+	}
+	return effective >= a.minLevel
+}
+
+func (a adapter) logInternal(level port.Level, msg string, _ context.Context, keyvals ...any) {
+	if level == port.Disabled || !a.shouldLog(level) {
+		return
+	}
+	sc := scratchPool.Get().(*scratch)
+	buf := sc.buf[:0]
+
+	var fields []kv
+	if len(a.baseFields) > 0 {
+		fields = append(fields, a.baseFields...)
+	}
+	if len(keyvals) > 0 {
+		fields = collectKeyvals(fields, keyvals, a.groups)
+	}
+
+	var timestamp string
+	if !a.disableTimestamp {
+		if a.useTimeCache && a.timeCache != nil {
+			timestamp = a.timeCache.Current()
+		} else {
+			timestamp = time.Now().Format(a.timeFormat)
+		}
+	}
+	if a.mode == ModeConsole {
+		buf = writeConsole(buf, level, msg, fields, timestamp, !a.disableTimestamp, a.colorEnabled)
+	} else {
+		names := fieldNames{time: "ts", level: "lvl", message: "msg"}
+		if a.verbose {
+			names = fieldNames{time: "time", level: "level", message: "message"}
+		}
+		buf = writeStructured(buf, level, msg, fields, timestamp, !a.disableTimestamp, names, a.colorJSONEnabled, a.colorEnabled)
+	}
+	buf = append(buf, '\n')
+	_, _ = a.writer.Write(buf)
+	if cap(buf) > 8192 {
+		sc.buf = make([]byte, 0, 256)
+	} else {
+		sc.buf = buf[:0]
+	}
+	scratchPool.Put(sc)
+}
+
+func cloneFields(src []kv) []kv {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]kv, len(src))
+	copy(dst, src)
+	return dst
+}
+
+func cloneStrings(src []string) []string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]string, len(src))
+	copy(dst, src)
+	return dst
+}
+
+func cloneLevel(lvl *port.Level) *port.Level {
+	if lvl == nil {
+		return nil
+	}
+	value := *lvl
+	return &value
+}
+
+func collectKeyvals(dst []kv, keyvals []any, groups []string) []kv {
+	pair := 0
+	for i := 0; i < len(keyvals); {
+		switch v := keyvals[i].(type) {
+		case slog.Attr:
+			dst = collectAttr(dst, v, groups)
+			i++
+		case []slog.Attr:
+			for _, attr := range v {
+				dst = collectAttr(dst, attr, groups)
+			}
+			i++
+		default:
+			var key string
+			if i+1 < len(keyvals) {
+				key = fmt.Sprint(v)
+				if len(groups) > 0 {
+					key = joinAttrKey(groups, key)
+				}
+				dst = append(dst, kv{key: key, value: keyvals[i+1]})
+				pair++
+				i += 2
+			} else {
+				key = fmt.Sprintf("arg%d", pair)
+				if len(groups) > 0 {
+					key = joinAttrKey(groups, key)
+				}
+				dst = append(dst, kv{key: key, value: v})
+				pair++
+				i++
+			}
+		}
+	}
+	return dst
+}
+
+func collectAttrs(dst []kv, attrs []slog.Attr, groups []string) []kv {
+	for _, attr := range attrs {
+		dst = collectAttr(dst, attr, groups)
+	}
+	return dst
+}
+
+func collectAttr(dst []kv, attr slog.Attr, groups []string) []kv {
+	attr.Value = attr.Value.Resolve()
+	switch attr.Value.Kind() {
+	case slog.KindGroup:
+		parent := groups
+		if attr.Key != "" {
+			parent = appendGroup(parent, attr.Key)
+		}
+		for _, nested := range attr.Value.Group() {
+			dst = collectAttr(dst, nested, parent)
+		}
+	default:
+		key := joinAttrKey(groups, attr.Key)
+		dst = append(dst, kv{key: key, value: attr.Value.Any()})
+	}
+	return dst
+}
+
+func appendGroup(groups []string, name string) []string {
+	if name == "" {
+		return groups
+	}
+	newGroups := make([]string, len(groups)+1)
+	copy(newGroups, groups)
+	newGroups[len(groups)] = name
+	return newGroups
+}
+
+func joinAttrKey(groups []string, key string) string {
+	if len(groups) == 0 {
+		return key
+	}
+	parts := make([]string, 0, len(groups)+1)
+	parts = append(parts, groups...)
+	if key != "" {
+		parts = append(parts, key)
+	}
+	return strings.Join(parts, ".")
+}
+
+const (
+	ansiReset        = "\x1b[0m"
+	ansiBold         = "\x1b[1m"
+	ansiFaint        = "\x1b[90m"
+	ansiRed          = "\x1b[31m"
+	ansiGreen        = "\x1b[32m"
+	ansiYellow       = "\x1b[33m"
+	ansiBlue         = "\x1b[34m"
+	ansiMagenta      = "\x1b[35m"
+	ansiCyan         = "\x1b[36m"
+	ansiBrightRed    = "\x1b[91m"
+	ansiBrightGreen  = "\x1b[92m"
+	ansiBrightYellow = "\x1b[93m"
+	ansiBrightWhite  = "\x1b[97m"
+)
+
+type fieldNames struct {
+	time    string
+	level   string
+	message string
+}
+
+var (
+	timeKeyPrefix    = []byte(`"time":"`)
+	tsKeyPrefix      = []byte(`"ts":"`)
+	levelKeyPrefix   = []byte(`"level":"`)
+	lvlKeyPrefix     = []byte(`"lvl":"`)
+	messageKeyPrefix = []byte(`"message":"`)
+	msgKeyPrefix     = []byte(`"msg":"`)
+)
+
+func writeConsole(buf []byte, level port.Level, msg string, fields []kv, timestamp string, includeTime bool, color bool) []byte {
+	if includeTime {
+		if color {
+			buf = append(buf, ansiFaint...)
+			buf = append(buf, timestamp...)
+			buf = append(buf, ansiReset...)
+		} else {
+			buf = append(buf, timestamp...)
+		}
+		buf = append(buf, ' ')
+	}
+	levelStr, levelColor := consoleLevel(level)
+	if color && levelColor != "" {
+		buf = append(buf, levelColor...)
+		buf = append(buf, levelStr...)
+		buf = append(buf, ansiReset...)
+	} else {
+		buf = append(buf, levelStr...)
+	}
+	if msg != "" {
+		buf = append(buf, ' ')
+		if color && shouldHighlight(level) {
+			buf = append(buf, ansiBold...)
+			buf = append(buf, msg...)
+			buf = append(buf, ansiReset...)
+		} else {
+			buf = append(buf, msg...)
+		}
+	}
+	for _, f := range fields {
+		buf = append(buf, ' ')
+		if color {
+			buf = append(buf, ansiCyan...)
+			buf = append(buf, f.key...)
+			buf = append(buf, '=')
+			buf = append(buf, ansiReset...)
+		} else {
+			buf = append(buf, f.key...)
+			buf = append(buf, '=')
+		}
+		buf = append(buf, formatConsoleValue(f.value)...)
+	}
+	return buf
+}
+
+func shouldHighlight(level port.Level) bool {
+	switch level {
+	case port.InfoLevel, port.WarnLevel, port.ErrorLevel, port.FatalLevel, port.PanicLevel:
+		return true
+	default:
+		return false
+	}
+}
+
+func consoleLevel(level port.Level) (string, string) {
+	switch level {
+	case port.TraceLevel:
+		return "TRC", ansiBlue
+	case port.DebugLevel:
+		return "DBG", ""
+	case port.InfoLevel:
+		return "INF", ansiGreen
+	case port.WarnLevel:
+		return "WRN", ansiYellow
+	case port.ErrorLevel:
+		return "ERR", ansiRed
+	case port.FatalLevel:
+		return "FTL", ansiRed
+	case port.PanicLevel:
+		return "PNC", ansiRed
+	case port.NoLevel:
+		return "---", ""
+	default:
+		return "INF", ansiGreen
+	}
+}
+
+func structuredLevel(level port.Level) string {
+	switch level {
+	case port.TraceLevel:
+		return "trace"
+	case port.DebugLevel:
+		return "debug"
+	case port.InfoLevel:
+		return "info"
+	case port.WarnLevel:
+		return "warn"
+	case port.ErrorLevel:
+		return "error"
+	case port.FatalLevel:
+		return "fatal"
+	case port.PanicLevel:
+		return "panic"
+	case port.NoLevel:
+		return "nolevel"
+	case port.Disabled:
+		return "disabled"
+	default:
+		return "info"
+	}
+}
+
+func formatConsoleValue(v any) string {
+	switch val := v.(type) {
+	case string:
+		if needsQuote(val) {
+			return strconv.Quote(val)
+		}
+		return val
+	case fmt.Stringer:
+		str := val.String()
+		if needsQuote(str) {
+			return strconv.Quote(str)
+		}
+		return str
+	case error:
+		str := val.Error()
+		if needsQuote(str) {
+			return strconv.Quote(str)
+		}
+		return str
+	case time.Time:
+		return val.Format(time.RFC3339Nano)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func needsQuote(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c > 0x7e || c == ' ' || c == '\\' || c == '"' {
+			return true
+		}
+	}
+	return false
+}
+
+func writeStructured(buf []byte, level port.Level, msg string, fields []kv, timestamp string, includeTime bool, names fieldNames, colorJSON bool, colorEnabled bool) []byte {
+	colored := colorJSON && colorEnabled
+	if !colored && len(fields) == 0 {
+		buf = append(buf, '{')
+		first := true
+		if includeTime {
+			buf = appendSafeStringField(buf, names.time, timestamp, &first)
+		}
+		buf = appendSafeStringField(buf, names.level, structuredLevel(level), &first)
+		if msg != "" {
+			buf = appendMaybeQuotedField(buf, names.message, msg, &first)
+		}
+		buf = append(buf, '}')
+		return buf
+	}
+	buf = append(buf, '{')
+	first := true
+	writePair := func(key string, value any, kind jsonValueKind) {
+		if !first {
+			buf = append(buf, ',')
+		}
+		first = false
+		buf = writeJSONKey(buf, key, colored)
+		buf = append(buf, ':')
+		switch kind {
+		case jsonValueLevel:
+			buf = writeJSONLevelValue(buf, level, colored)
+		case jsonValueMessage:
+			switch v := value.(type) {
+			case string:
+				buf = writeJSONMessageValue(buf, v, colored)
+			default:
+				buf = writeJSONMessageValue(buf, fmt.Sprint(v), colored)
+			}
+		default:
+			buf = writeJSONValue(buf, value, colored)
+		}
+	}
+	if includeTime {
+		writePair(names.time, timestamp, jsonValueDefault)
+	}
+	writePair(names.level, structuredLevel(level), jsonValueLevel)
+	if msg != "" {
+		writePair(names.message, msg, jsonValueMessage)
+	}
+	for _, f := range fields {
+		writePair(f.key, f.value, jsonValueDefault)
+	}
+	buf = append(buf, '}')
+	return buf
+}
+
+type jsonValueKind int
+
+const (
+	jsonValueDefault jsonValueKind = iota
+	jsonValueLevel
+	jsonValueMessage
+)
+
+func appendSafeStringField(buf []byte, key, value string, first *bool) []byte {
+	if !*first {
+		buf = append(buf, ',')
+	}
+	*first = false
+	switch key {
+	case "time":
+		buf = append(buf, timeKeyPrefix...)
+	case "ts":
+		buf = append(buf, tsKeyPrefix...)
+	case "level":
+		buf = append(buf, levelKeyPrefix...)
+	case "lvl":
+		buf = append(buf, lvlKeyPrefix...)
+	case "msg":
+		buf = append(buf, msgKeyPrefix...)
+	case "message":
+		buf = append(buf, messageKeyPrefix...)
+	default:
+		buf = append(buf, '"')
+		buf = append(buf, key...)
+		buf = append(buf, '"', ':', '"')
+	}
+	buf = append(buf, value...)
+	buf = append(buf, '"')
+	return buf
+}
+
+func appendQuotedField(buf []byte, key, value string, first *bool) []byte {
+	if !*first {
+		buf = append(buf, ',')
+	}
+	*first = false
+	buf = append(buf, '"')
+	buf = append(buf, key...)
+	buf = append(buf, '"', ':')
+	buf = strconv.AppendQuote(buf, value)
+	return buf
+}
+
+func appendMaybeQuotedField(buf []byte, key, value string, first *bool) []byte {
+	if !needsQuote(value) {
+		return appendSafeStringField(buf, key, value, first)
+	}
+	return appendQuotedField(buf, key, value, first)
+}
+
+func writeJSONKey(buf []byte, key string, color bool) []byte {
+	if color {
+		buf = append(buf, ansiCyan...)
+		buf = strconv.AppendQuote(buf, key)
+		buf = append(buf, ansiReset...)
+	} else {
+		buf = strconv.AppendQuote(buf, key)
+	}
+	return buf
+}
+
+func writeJSONValue(buf []byte, value any, color bool) []byte {
+	switch v := value.(type) {
+	case string:
+		buf = writeJSONString(buf, v, color, true)
+		return buf
+	case fmt.Stringer:
+		buf = writeJSONString(buf, v.String(), color, true)
+		return buf
+	case error:
+		buf = writeJSONString(buf, v.Error(), color, true)
+		return buf
+	case bool:
+		if color {
+			buf = append(buf, ansiYellow...)
+		}
+		buf = strconv.AppendBool(buf, v)
+	case time.Time:
+		buf = writeJSONString(buf, v.Format(time.RFC3339Nano), color, true)
+		return buf
+	case json.Marshaler:
+		bytes, err := v.MarshalJSON()
+		if err != nil {
+			buf = writeJSONString(buf, err.Error(), color, true)
+			return buf
+		}
+		buf = writeJSONRaw(buf, bytes, color)
+		return buf

@@ -1,7 +1,6 @@
 package logport_test
 
 import (
-	"io"
 	"testing"
 
 	logport "pkt.systems/logport"
@@ -11,7 +10,8 @@ func BenchmarkAdapterInfo(b *testing.B) {
 	for _, adapter := range adapterFactories() {
 		adapter := adapter
 		b.Run(adapter.name, func(b *testing.B) {
-			logger := adapter.make(io.Discard)
+			sink := newBenchmarkSink()
+			logger := adapter.make(sink)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -25,7 +25,8 @@ func BenchmarkAdapterError(b *testing.B) {
 	for _, adapter := range adapterFactories() {
 		adapter := adapter
 		b.Run(adapter.name, func(b *testing.B) {
-			logger := adapter.make(io.Discard)
+			sink := newBenchmarkSink()
+			logger := adapter.make(sink)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -50,7 +51,8 @@ func BenchmarkAdapterLogLogger(b *testing.B) {
 		for _, tc := range cases {
 			tc := tc
 			b.Run(adapter.name+"/"+tc.name, func(b *testing.B) {
-				logger := adapter.make(io.Discard)
+				sink := newBenchmarkSink()
+				logger := adapter.make(sink)
 				std := logport.LogLogger(logger)
 				std.SetFlags(0)
 				b.ReportAllocs()
