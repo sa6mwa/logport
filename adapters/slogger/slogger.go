@@ -104,6 +104,14 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	return adapter{logger: next, handler: next.Handler(), forcedLevel: a.forcedLevel, minLevel: a.minLevel}
 }
 
+func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
+	keyvals := port.TraceKeyvalsFromContext(ctx)
+	if len(keyvals) == 0 {
+		return a
+	}
+	return a.With(keyvals...)
+}
+
 func (a adapter) Log(ctx context.Context, level slog.Level, msg string, keyvals ...any) {
 	if ctx == nil {
 		ctx = context.Background()

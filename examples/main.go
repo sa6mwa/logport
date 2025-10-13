@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"pkt.systems/logport"
 	"pkt.systems/logport/adapters/charmlogger"
 	"pkt.systems/logport/adapters/onelogger"
@@ -18,6 +19,15 @@ import (
 )
 
 func main() {
+	traceID, _ := oteltrace.TraceIDFromHex("0123456789abcdef0123456789abcdef")
+	spanID, _ := oteltrace.SpanIDFromHex("fedcba9876543210")
+	spanCtx := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: oteltrace.FlagsSampled,
+	})
+	ctx := oteltrace.ContextWithSpanContext(context.Background(), spanCtx)
+
 	logger := phuslu.New(os.Stdout).With("logAdapter", "phuslu").LogLevel(logport.TraceLevel)
 	logger.Info("Hello, this is the phuslu log adapter", "hello", "world", "phuslu", true)
 	logger.Warn("Warning", "phuslu", true)
@@ -29,6 +39,7 @@ func main() {
 		"normalKey", "normalValue",
 	)
 	logger.With(slog.String("via", "Warnf")).Warnf("This is a %q message", "convenient")
+	logger.WithTrace(ctx).Info("This is WithTrace to log otel span and trace ids from span contexts")
 	fmt.Println("")
 
 	logger = zerologger.New(os.Stdout).With("logAdapter", "zerologger", "zerologger", true).LogLevel(logport.InfoLevel)
@@ -110,6 +121,8 @@ func main() {
 	logger.Warn("A warning message")
 	logger.Debug("This is a debug message", "debugging", true)
 	logger.Trace("Testing trace level with slog.Group", slog.Group("group", "key", "value", "key2", "value2"))
+	fmt.Println("")
+
 	oopts := onelogger.Options{
 		ContextName: "testContext",
 	}
@@ -118,6 +131,8 @@ func main() {
 	logger = onelogger.NewWithOptions(os.Stdout, oopts).LogLevel(logport.WarnLevel).With("adapter", "onelogger", "options", oopts)
 	logger.WithLogLevel().Info("This should not show")
 	logger.Warn("This should show as loglevel is Warn")
+	fmt.Println("")
+
 	oopts = onelogger.Options{
 		DisableTimestamp: true,
 	}
@@ -127,16 +142,21 @@ func main() {
 	logger = logger.LogLevelFromEnv("EXAMPLE_LOG_LEVEL").With("LogLevelFromEnv", os.Getenv("EXAMPLE_LOG_LEVEL")).WithLogLevel()
 	logger.Info("This should not show")
 	logger.Warn("This should show")
+	logger = logger.LogLevel(logport.TraceLevel).WithTrace(ctx)
+	logger.Warn("This is WithTrace to log otel span and trace ids from span contexts")
+	fmt.Println("")
 
 	logger = psl.New(os.Stdout).With("adapter", "psl").With("mode", "console")
 	logger.Info("Hello, this is logport's native adapter in console mode")
 	logger.Warn("This is a warning message")
 	logger.Error("This is an error message")
+	logger.WithTrace(ctx).Trace("This is a trace level msg WithTrace adding trace and span ids from otel span context")
+	fmt.Println("")
 
 	logger = psl.NewStructured(os.Stdout).With("adapter", "psl").With("mode", "structured").WithLogLevel().With("num", 123)
 	logger.Info("Hello, this is logport's native structured logger")
 	logger.Warn("This is a warning message")
-	logger.Error("This is an error")
+	logger.WithTrace(ctx).Error("This is an error WithTrace adding trace and span ids from an otel span context")
 
 	popts := psl.Options{
 		Mode:       psl.ModeStructured,

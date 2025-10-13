@@ -136,6 +136,14 @@ func (c charmAdapter) With(keyvals ...any) port.ForLogging {
 	return charmAdapter{logger: c.logger.With(normalized...), groups: c.groups, forcedLevel: c.forcedLevel}
 }
 
+func (c charmAdapter) WithTrace(ctx context.Context) port.ForLogging {
+	keyvals := port.TraceKeyvalsFromContext(ctx)
+	if len(keyvals) == 0 {
+		return c
+	}
+	return c.With(keyvals...)
+}
+
 func (c charmAdapter) Debug(msg string, keyvals ...any) {
 	if c.forceNoLevel() {
 		keyvals = normalizeCharmKeyvals(keyvals, c.groups)

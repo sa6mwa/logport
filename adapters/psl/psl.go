@@ -355,6 +355,14 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	}
 }
 
+func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
+	keyvals := port.TraceKeyvalsFromContext(ctx)
+	if len(keyvals) == 0 {
+		return a
+	}
+	return a.With(keyvals...)
+}
+
 func (a adapter) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return a

@@ -80,6 +80,24 @@ type ForLogging interface {
 	// subsequent log entry. The receiver remains untouched.
 	With(keyvals ...any) ForLogging
 
+	// WithTrace utilizes otel/trace to add trace_id and span_id keyvals to the
+	// logger derived from an OpenTelemetry span context (set by
+	// otel.Tracer("...").Start(origCtx, "...").
+	//
+	// Example:
+	//
+	//	tracer := otel.Tracer("worker")
+	//	func handle(ctx context.Context, logger logport.ForLogging) {
+	//		ctx, span := tracer.Start(ctx, "handle")
+	//		defer span.End()
+	//
+	//		logger.WithTrace(ctx).With("component", "api").Info("processing request")
+	//	}
+	//
+	// The returned logger includes "trace_id" and "span_id" keyvals when the
+	// context carries a valid OpenTelemetry span.
+	WithTrace(ctx context.Context) ForLogging
+
 	// Log mirrors slog.Logger.Log and emits msg at the provided slog level using
 	// the supplied context and key/value pairs.
 	Log(ctx context.Context, level slog.Level, msg string, keyvals ...any)
@@ -97,13 +115,13 @@ type ForLogging interface {
 
 	ForLoggingMinimalSubset
 
+	// Trace logs msg at TraceLevel (below DebugLevel).
+	Trace(msg string, keyvals ...any)
 	// Fatal logs msg at FatalLevel and terminates the process when the backend
 	// supports it.
 	Fatal(msg string, keyvals ...any)
 	// Panic logs msg at PanicLevel and panics when the backend supports it.
 	Panic(msg string, keyvals ...any)
-	// Trace logs msg at TraceLevel (below DebugLevel).
-	Trace(msg string, keyvals ...any)
 
 	// Debugf logs a formatted message at DebugLevel.
 	Debugf(format string, v ...any)
@@ -250,6 +268,7 @@ func (noopLogger) Logp(Level, string, ...any)                      {}
 func (noopLogger) Logs(string, string, ...any)                     {}
 func (noopLogger) Logf(Level, string, ...any)                      {}
 func (noopLogger) With(keyvals ...any) ForLogging                  { return noopLogger{} }
+func (noopLogger) WithTrace(context.Context) ForLogging            { return noopLogger{} }
 func (noopLogger) Debug(msg string, keyvals ...any)                {}
 func (noopLogger) Debugf(string, ...any)                           {}
 func (noopLogger) Info(msg string, keyvals ...any)                 {}

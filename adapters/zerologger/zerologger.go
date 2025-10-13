@@ -155,6 +155,14 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	return adapter{logger: ctx.Logger(), groups: a.groups, forcedLevel: a.forcedLevel}
 }
 
+func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
+	keyvals := port.TraceKeyvalsFromContext(ctx)
+	if len(keyvals) == 0 {
+		return a
+	}
+	return a.With(keyvals...)
+}
+
 func (a adapter) WithLogLevel() port.ForLogging {
 	return a.With("loglevel", port.LevelString(a.currentLevel()))
 }

@@ -55,6 +55,9 @@ is designed to sit in that sweet spot.
 - Convenience `*f` helpers (`Debugf`, `Infof`, etc.) when you want printf-style
   messages—handy for quick logs, though key/value logging remains the
   allocation-free option for hot paths.
+- Context-aware tracing via `WithTrace(ctx)` so every adapter automatically
+  adds `trace_id` and `span_id` fields when your context carries an
+  OpenTelemetry span.
 - Level-aware helpers: `Trace`, `Debug`, `Info`, `Warn`, `Error`, `Fatal`, and
   `Panic` plus chaining through `LogLevel`. `LogLevelFromEnv("APP_LOG_LEVEL")`
   lets you promote severity at runtime, and `WithLogLevel()` stamps the current
@@ -130,10 +133,26 @@ func main() {
 }
 
 func doWork(ctx context.Context) {
-    log := port.LoggerFromContext(ctx)
+    log := port.LoggerFromContext(ctx).WithTrace(ctx)
     log.Info("processing", "job", 42)
 }
 ```
+
+### OpenTelemetry traces
+
+When your context carries an OpenTelemetry span, `WithTrace` pulls the
+identifiers straight from it so every adapter emits consistent tracing fields:
+
+```go
+ctx, span := tracer.Start(ctx, "work")
+defer span.End()
+
+logger.WithTrace(ctx).Info("handled request")
+```
+
+The helper extracts `trace_id` and `span_id` following the OTel semantic
+conventions, keeping your logs aligned with distributed traces without
+per-adapter plumbing.
 
 ### Stdlib compatibility
 

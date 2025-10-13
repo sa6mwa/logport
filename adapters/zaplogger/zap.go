@@ -113,6 +113,14 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	return adapter{logger: a.logger.With(fields...), groups: a.groups, minLevel: a.minLevel, configuredLevel: a.configuredLevel}
 }
 
+func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
+	keyvals := port.TraceKeyvalsFromContext(ctx)
+	if len(keyvals) == 0 {
+		return a
+	}
+	return a.With(keyvals...)
+}
+
 func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
 	if level, ok := port.LevelFromEnv(key); ok {
 		return a.LogLevel(level)
