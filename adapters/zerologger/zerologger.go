@@ -14,9 +14,10 @@ import (
 )
 
 type adapter struct {
-	logger      zerolog.Logger
-	groups      []string
-	forcedLevel *port.Level
+	logger          zerolog.Logger
+	groups          []string
+	forcedLevel     *port.Level
+	includeLogLevel bool
 }
 
 // Options controls how the zerolog adapter formats log output.
@@ -152,7 +153,7 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	if fields := fieldsFromKeyvals(keyvals, nil); len(fields) > 0 {
 		ctx = ctx.Fields(fields)
 	}
-	return adapter{logger: ctx.Logger(), groups: a.groups, forcedLevel: a.forcedLevel}
+	return adapter{logger: ctx.Logger(), groups: a.groups, forcedLevel: a.forcedLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
@@ -164,7 +165,10 @@ func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
 }
 
 func (a adapter) WithLogLevel() port.ForLogging {
-	return a.With("loglevel", port.LevelString(a.currentLevel()))
+	if a.includeLogLevel {
+		return a
+	}
+	return adapter{logger: a.logger, groups: a.groups, forcedLevel: a.forcedLevel, includeLogLevel: true}
 }
 
 func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
@@ -177,14 +181,15 @@ func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
 func (a adapter) LogLevel(level port.Level) port.ForLogging {
 	if level == port.NoLevel {
 		lvl := level
-		return adapter{logger: a.logger, groups: a.groups, forcedLevel: &lvl}
+		return adapter{logger: a.logger, groups: a.groups, forcedLevel: &lvl, includeLogLevel: a.includeLogLevel}
 	}
-	return adapter{logger: a.logger.Level(portLevelToZero(level)), groups: a.groups}
+	return adapter{logger: a.logger.Level(portLevelToZero(level)), groups: a.groups, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) Debug(msg string, keyvals ...any) {
 	event := a.newEvent(zerolog.DebugLevel)
 	addFields(event, keyvals, a.groups)
+	a.addLogLevel(event)
 	event.Msg(msg)
 }
 
@@ -236,6 +241,7 @@ func (a adapter) Debugf(format string, args ...any) {
 func (a adapter) Info(msg string, keyvals ...any) {
 	event := a.newEvent(zerolog.InfoLevel)
 	addFields(event, keyvals, a.groups)
+	a.addLogLevel(event)
 	event.Msg(msg)
 }
 
@@ -246,6 +252,7 @@ func (a adapter) Infof(format string, args ...any) {
 func (a adapter) Warn(msg string, keyvals ...any) {
 	event := a.newEvent(zerolog.WarnLevel)
 	addFields(event, keyvals, a.groups)
+	a.addLogLevel(event)
 	event.Msg(msg)
 }
 
@@ -256,6 +263,7 @@ func (a adapter) Warnf(format string, args ...any) {
 func (a adapter) Error(msg string, keyvals ...any) {
 	event := a.newEvent(zerolog.ErrorLevel)
 	addFields(event, keyvals, a.groups)
+	a.addLogLevel(event)
 	event.Msg(msg)
 }
 
@@ -266,6 +274,7 @@ func (a adapter) Errorf(format string, args ...any) {
 func (a adapter) Fatal(msg string, keyvals ...any) {
 	event := a.logger.Fatal()
 	addFields(event, keyvals, a.groups)
+	a.addLogLevel(event)
 	event.Msg(msg)
 }
 
@@ -279,6 +288,7 @@ func (a adapter) Panic(msg string, keyvals ...any) {
 		panic(msg)
 	}
 	addFields(event, keyvals, a.groups)
+	a.addLogLevel(event)
 	event.Msg(msg)
 }
 
@@ -292,6 +302,7 @@ func (a adapter) Trace(msg string, keyvals ...any) {
 		return
 	}
 	addFields(event, keyvals, a.groups)
+	a.addLogLevel(event)
 	event.Msg(msg)
 }
 
@@ -301,6 +312,13 @@ func (a adapter) Tracef(format string, args ...any) {
 
 func (a adapter) Write(p []byte) (int, error) {
 	return port.WriteToLogger(a, p)
+}
+
+func (a adapter) addLogLevel(event *zerolog.Event) {
+	if event == nil || !a.includeLogLevel {
+		return
+	}
+	event.Str("loglevel", port.LevelString(a.currentLevel()))
 }
 
 func appendUnique(parts []string, part string) []string {
@@ -437,6 +455,7 @@ func (a adapter) Handle(_ context.Context, record slog.Record) error {
 	}
 	keyvals := recordToKeyvals(record, a.groups)
 	addFields(event, keyvals, nil)
+	a.addLogLevel(event)
 	event.Msg(record.Message)
 	return nil
 }
@@ -449,14 +468,14 @@ func (a adapter) WithAttrs(attrs []slog.Attr) slog.Handler {
 	if fields := fieldsFromKeyvals(attrsToKeyvals(attrs, a.groups), nil); len(fields) > 0 {
 		ctx = ctx.Fields(fields)
 	}
-	return adapter{logger: ctx.Logger(), groups: a.groups, forcedLevel: a.forcedLevel}
+	return adapter{logger: ctx.Logger(), groups: a.groups, forcedLevel: a.forcedLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return a
 	}
-	return adapter{logger: a.logger, groups: appendGroup(a.groups, name), forcedLevel: a.forcedLevel}
+	return adapter{logger: a.logger, groups: appendGroup(a.groups, name), forcedLevel: a.forcedLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func slogLevelToZero(level slog.Level) zerolog.Level {
@@ -617,6 +636,7 @@ func (a adapter) forceNoLevel() bool {
 func (a adapter) logNoLevel(msg string, keyvals ...any) {
 	event := a.logger.Log()
 	addFields(event, keyvals, a.groups)
+	a.addLogLevel(event)
 	event.Msg(msg)
 }
 

@@ -166,5 +166,13 @@ func main() {
 	}
 	logger = psl.NewWithOptions(os.Stdout, popts).With("adapter", "psl")
 	logger.Info("This is in UTC")
+	fmt.Println("")
+
+	logger = psl.NewStructured(os.Stdout).WithLogLevel().LogLevel(logport.DebugLevel)
+	logger.Trace("trace")
+	logger.Debug("debug")
+	logger.Info("info")
+	logger.Warn("warn")
+	logger.Error("error")
 
 }

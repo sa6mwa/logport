@@ -40,10 +40,11 @@ func ContextWithLogger(ctx context.Context, w io.Writer, opts Options) context.C
 }
 
 type adapter struct {
-	logger      *plog.Logger
-	baseKeyvals []any
-	groups      []string
-	forcedLevel *port.Level
+	logger          *plog.Logger
+	baseKeyvals     []any
+	groups          []string
+	forcedLevel     *port.Level
+	includeLogLevel bool
 }
 
 func (a adapter) LogLevel(level port.Level) port.ForLogging {
@@ -52,11 +53,11 @@ func (a adapter) LogLevel(level port.Level) port.ForLogging {
 	}
 	if level == port.NoLevel {
 		lvl := level
-		return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: a.groups, forcedLevel: &lvl}
+		return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: a.groups, forcedLevel: &lvl, includeLogLevel: a.includeLogLevel}
 	}
 	clone := *a.logger
 	clone.Level = portLevelToPhuslu(level)
-	return adapter{logger: &clone, baseKeyvals: a.baseKeyvals, groups: a.groups}
+	return adapter{logger: &clone, baseKeyvals: a.baseKeyvals, groups: a.groups, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
@@ -67,7 +68,10 @@ func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
 }
 
 func (a adapter) WithLogLevel() port.ForLogging {
-	return a.With("loglevel", port.LevelString(a.currentLevel()))
+	if a.includeLogLevel {
+		return a
+	}
+	return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: a.groups, forcedLevel: a.forcedLevel, includeLogLevel: true}
 }
 
 func (a adapter) Log(_ context.Context, level slog.Level, msg string, keyvals ...any) {
@@ -125,7 +129,7 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	base := make([]any, 0, len(a.baseKeyvals)+len(addition))
 	base = append(base, a.baseKeyvals...)
 	base = append(base, addition...)
-	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups, forcedLevel: a.forcedLevel}
+	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups, forcedLevel: a.forcedLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
@@ -259,6 +263,7 @@ func (a adapter) logEntry(entry *plog.Entry, msg string, keyvals []any) {
 			entry.KeysAndValues(addition...)
 		}
 	}
+	a.appendLogLevel(entry)
 	entry.Msg(msg)
 }
 
@@ -289,6 +294,7 @@ func (a adapter) Handle(_ context.Context, record slog.Record) error {
 		if kvs := recordToKeyvals(record, a.groups); len(kvs) > 0 {
 			entry.KeysAndValues(kvs...)
 		}
+		a.appendLogLevel(entry)
 		entry.Msg(record.Message)
 		return nil
 	}
@@ -302,6 +308,7 @@ func (a adapter) Handle(_ context.Context, record slog.Record) error {
 	if kvs := recordToKeyvals(record, a.groups); len(kvs) > 0 {
 		entry.KeysAndValues(kvs...)
 	}
+	a.appendLogLevel(entry)
 	entry.Msg(record.Message)
 	return nil
 }
@@ -317,7 +324,7 @@ func (a adapter) WithAttrs(attrs []slog.Attr) slog.Handler {
 	base := make([]any, 0, len(a.baseKeyvals)+len(addition))
 	base = append(base, a.baseKeyvals...)
 	base = append(base, addition...)
-	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups, forcedLevel: a.forcedLevel}
+	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups, forcedLevel: a.forcedLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) WithGroup(name string) slog.Handler {
@@ -325,7 +332,7 @@ func (a adapter) WithGroup(name string) slog.Handler {
 		return a
 	}
 	groups := appendGroup(a.groups, name)
-	return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: groups, forcedLevel: a.forcedLevel}
+	return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: groups, forcedLevel: a.forcedLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func slogLevelToPhuslu(level slog.Level) plog.Level {
@@ -463,7 +470,8 @@ func (a adapter) currentLevel() port.Level {
 	if a.logger == nil {
 		return port.InfoLevel
 	}
-	return phusluLevelToPort(a.logger.Level)
+	current := plog.Level(atomic.LoadUint32((*uint32)(&a.logger.Level)))
+	return phusluLevelToPort(current)
 }
 
 func portLevelToPhuslu(level port.Level) plog.Level {
@@ -508,6 +516,13 @@ func phusluLevelToPort(level plog.Level) port.Level {
 	default:
 		return port.InfoLevel
 	}
+}
+
+func (a adapter) appendLogLevel(entry *plog.Entry) {
+	if entry == nil || !a.includeLogLevel {
+		return
+	}
+	entry.Str("loglevel", port.LevelString(a.currentLevel()))
 }
 
 var _ port.ForLogging = adapter{}

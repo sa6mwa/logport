@@ -154,6 +154,7 @@ type adapter struct {
 	baseFields       []kv
 	groups           []string
 	verbose          bool
+	includeLogLevel  bool
 	timeCache        *timeCache
 	useTimeCache     bool
 	useUTC           bool
@@ -292,6 +293,7 @@ func (a adapter) LogLevel(level port.Level) port.ForLogging {
 			baseFields:       cloneFields(a.baseFields),
 			groups:           cloneStrings(a.groups),
 			verbose:          a.verbose,
+			includeLogLevel:  a.includeLogLevel,
 			timeCache:        a.timeCache,
 			useTimeCache:     a.useTimeCache,
 			useUTC:           a.useUTC,
@@ -309,6 +311,7 @@ func (a adapter) LogLevel(level port.Level) port.ForLogging {
 		baseFields:       cloneFields(a.baseFields),
 		groups:           cloneStrings(a.groups),
 		verbose:          a.verbose,
+		includeLogLevel:  a.includeLogLevel,
 		timeCache:        a.timeCache,
 		useTimeCache:     a.useTimeCache,
 		useUTC:           a.useUTC,
@@ -324,7 +327,27 @@ func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
 }
 
 func (a adapter) WithLogLevel() port.ForLogging {
-	return a.With("loglevel", port.LevelString(a.currentLevel()))
+	if a.includeLogLevel {
+		return a
+	}
+	return adapter{
+		writer:           a.writer,
+		mode:             a.mode,
+		timeFormat:       a.timeFormat,
+		colorEnabled:     a.colorEnabled,
+		colorJSONEnabled: a.colorJSONEnabled,
+		disableTimestamp: a.disableTimestamp,
+		minLevel:         a.minLevel,
+		forcedLevel:      cloneLevel(a.forcedLevel),
+		baseFields:       cloneFields(a.baseFields),
+		groups:           cloneStrings(a.groups),
+		verbose:          a.verbose,
+		includeLogLevel:  true,
+		timeCache:        a.timeCache,
+		useTimeCache:     a.useTimeCache,
+		useUTC:           a.useUTC,
+		discard:          a.discard,
+	}
 }
 
 func (a adapter) With(keyvals ...any) port.ForLogging {
@@ -348,6 +371,7 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 		baseFields:       combined,
 		groups:           cloneStrings(a.groups),
 		verbose:          a.verbose,
+		includeLogLevel:  a.includeLogLevel,
 		timeCache:        a.timeCache,
 		useTimeCache:     a.useTimeCache,
 		useUTC:           a.useUTC,
@@ -380,6 +404,7 @@ func (a adapter) WithGroup(name string) slog.Handler {
 		baseFields:       cloneFields(a.baseFields),
 		groups:           groups,
 		verbose:          a.verbose,
+		includeLogLevel:  a.includeLogLevel,
 		timeCache:        a.timeCache,
 		useTimeCache:     a.useTimeCache,
 		useUTC:           a.useUTC,
@@ -405,6 +430,7 @@ func (a adapter) WithAttrs(attrs []slog.Attr) slog.Handler {
 		baseFields:       combined,
 		groups:           cloneStrings(a.groups),
 		verbose:          a.verbose,
+		includeLogLevel:  a.includeLogLevel,
 		timeCache:        a.timeCache,
 		useTimeCache:     a.useTimeCache,
 		useUTC:           a.useUTC,
@@ -536,6 +562,9 @@ func (a adapter) logInternal(level port.Level, msg string, _ context.Context, ke
 	}
 	if len(keyvals) > 0 {
 		fields = collectKeyvals(fields, keyvals, a.groups)
+	}
+	if a.includeLogLevel {
+		fields = append(fields, kv{key: "loglevel", value: port.LevelString(a.currentLevel())})
 	}
 
 	includeTime := !a.disableTimestamp

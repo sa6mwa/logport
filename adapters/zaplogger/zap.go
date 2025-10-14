@@ -17,6 +17,7 @@ type adapter struct {
 	groups          []string
 	minLevel        *zapcore.Level
 	configuredLevel *port.Level
+	includeLogLevel bool
 }
 
 // Options controls zap-backed adapter configuration.
@@ -110,7 +111,7 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	if len(fields) == 0 {
 		return a
 	}
-	return adapter{logger: a.logger.With(fields...), groups: a.groups, minLevel: a.minLevel, configuredLevel: a.configuredLevel}
+	return adapter{logger: a.logger.With(fields...), groups: a.groups, minLevel: a.minLevel, configuredLevel: a.configuredLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
@@ -135,15 +136,18 @@ func (a adapter) LogLevel(level port.Level) port.ForLogging {
 	if level == port.NoLevel {
 		lvl := zapcore.DebugLevel
 		configured := level
-		return adapter{logger: a.logger, groups: a.groups, minLevel: &lvl, configuredLevel: &configured}
+		return adapter{logger: a.logger, groups: a.groups, minLevel: &lvl, configuredLevel: &configured, includeLogLevel: a.includeLogLevel}
 	}
 	zapLevel := portLevelToZap(level)
 	configured := level
-	return adapter{logger: a.logger, groups: a.groups, minLevel: &zapLevel, configuredLevel: &configured}
+	return adapter{logger: a.logger, groups: a.groups, minLevel: &zapLevel, configuredLevel: &configured, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) WithLogLevel() port.ForLogging {
-	return a.With("loglevel", port.LevelString(a.currentLevel()))
+	if a.includeLogLevel {
+		return a
+	}
+	return adapter{logger: a.logger, groups: a.groups, minLevel: a.minLevel, configuredLevel: a.configuredLevel, includeLogLevel: true}
 }
 
 func (a adapter) Log(ctx context.Context, level slog.Level, msg string, keyvals ...any) {
@@ -193,6 +197,7 @@ func (a adapter) Debug(msg string, keyvals ...any) {
 		return
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
+	fields = a.appendLogLevelField(fields)
 	a.logger.Debug(msg, fields...)
 }
 
@@ -208,6 +213,7 @@ func (a adapter) Info(msg string, keyvals ...any) {
 		return
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
+	fields = a.appendLogLevelField(fields)
 	a.logger.Info(msg, fields...)
 }
 
@@ -223,6 +229,7 @@ func (a adapter) Warn(msg string, keyvals ...any) {
 		return
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
+	fields = a.appendLogLevelField(fields)
 	a.logger.Warn(msg, fields...)
 }
 
@@ -238,6 +245,7 @@ func (a adapter) Error(msg string, keyvals ...any) {
 		return
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
+	fields = a.appendLogLevelField(fields)
 	a.logger.Error(msg, fields...)
 }
 
@@ -250,6 +258,7 @@ func (a adapter) Fatal(msg string, keyvals ...any) {
 		return
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
+	fields = a.appendLogLevelField(fields)
 	a.logger.Fatal(msg, fields...)
 }
 
@@ -262,6 +271,7 @@ func (a adapter) Panic(msg string, keyvals ...any) {
 		panic(msg)
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
+	fields = a.appendLogLevelField(fields)
 	a.logger.Panic(msg, fields...)
 }
 
@@ -277,6 +287,7 @@ func (a adapter) Trace(msg string, keyvals ...any) {
 		return
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
+	fields = a.appendLogLevelField(fields)
 	a.logger.Debug(msg, fields...)
 }
 
@@ -309,6 +320,7 @@ func (a adapter) Handle(_ context.Context, record slog.Record) error {
 	}
 	if ce := a.logger.Check(zapLevel, record.Message); ce != nil {
 		fields := recordToFields(record, a.groups)
+		fields = a.appendLogLevelField(fields)
 		ce.Write(fields...)
 	}
 	return nil
@@ -322,14 +334,14 @@ func (a adapter) WithAttrs(attrs []slog.Attr) slog.Handler {
 	if len(fields) == 0 {
 		return a
 	}
-	return adapter{logger: a.logger.With(fields...), groups: a.groups, minLevel: a.minLevel, configuredLevel: a.configuredLevel}
+	return adapter{logger: a.logger.With(fields...), groups: a.groups, minLevel: a.minLevel, configuredLevel: a.configuredLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return a
 	}
-	return adapter{logger: a.logger, groups: appendGroup(a.groups, name), minLevel: a.minLevel, configuredLevel: a.configuredLevel}
+	return adapter{logger: a.logger, groups: appendGroup(a.groups, name), minLevel: a.minLevel, configuredLevel: a.configuredLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func slogLevelToZap(level slog.Level) zapcore.Level {
@@ -357,6 +369,13 @@ func (a adapter) currentLevel() port.Level {
 		return zapLevelToPort(*a.minLevel)
 	}
 	return port.InfoLevel
+}
+
+func (a adapter) appendLogLevelField(fields []zap.Field) []zap.Field {
+	if !a.includeLogLevel {
+		return fields
+	}
+	return append(fields, zap.String("loglevel", port.LevelString(a.currentLevel())))
 }
 
 func keyvalsToFields(groups []string, keyvals []any) []zap.Field {

@@ -101,11 +101,12 @@ func ContextWithLogger(ctx context.Context, w io.Writer, opts Options) context.C
 }
 
 type adapter struct {
-	logger      *onelogpkg.Logger
-	baseKeyvals []any
-	groups      []string
-	forcedLevel *port.Level
-	minLevel    port.Level
+	logger          *onelogpkg.Logger
+	baseKeyvals     []any
+	groups          []string
+	forcedLevel     *port.Level
+	minLevel        port.Level
+	includeLogLevel bool
 }
 
 func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
@@ -119,9 +120,9 @@ func (a adapter) LogLevel(level port.Level) port.ForLogging {
 	switch level {
 	case port.NoLevel, port.Disabled:
 		lvl := level
-		return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: a.groups, forcedLevel: &lvl, minLevel: a.minLevel}
+		return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: a.groups, forcedLevel: &lvl, minLevel: a.minLevel, includeLogLevel: a.includeLogLevel}
 	default:
-		return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: a.groups, minLevel: level}
+		return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: a.groups, minLevel: level, includeLogLevel: a.includeLogLevel}
 	}
 }
 
@@ -136,7 +137,7 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	base := make([]any, 0, len(a.baseKeyvals)+len(addition))
 	base = append(base, a.baseKeyvals...)
 	base = append(base, addition...)
-	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups, forcedLevel: a.forcedLevel, minLevel: a.minLevel}
+	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups, forcedLevel: a.forcedLevel, minLevel: a.minLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
@@ -148,7 +149,17 @@ func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
 }
 
 func (a adapter) WithLogLevel() port.ForLogging {
-	return a.With("loglevel", port.LevelString(a.currentLevel()))
+	if a.includeLogLevel {
+		return a
+	}
+	return adapter{
+		logger:          a.logger,
+		baseKeyvals:     a.baseKeyvals,
+		groups:          a.groups,
+		forcedLevel:     a.forcedLevel,
+		minLevel:        a.minLevel,
+		includeLogLevel: true,
+	}
 }
 
 func (a adapter) Log(_ context.Context, level slog.Level, msg string, keyvals ...any) {
@@ -237,6 +248,7 @@ func (a adapter) log(level port.Level, msg string, keyvals []any) {
 	entry = addKeyvals(entry, a.baseKeyvals)
 	addition := normalizeKeyvals(keyvals, a.groups)
 	entry = addKeyvals(entry, addition)
+	entry = a.appendLogLevel(entry)
 	entry.Write()
 }
 
@@ -248,6 +260,7 @@ func (a adapter) logFatal(msg string, keyvals []any) {
 	entry = addKeyvals(entry, a.baseKeyvals)
 	addition := normalizeKeyvals(keyvals, a.groups)
 	entry = addKeyvals(entry, addition)
+	entry = a.appendLogLevel(entry)
 	entry.Write()
 	if a.logger != nil && a.logger.ExitFn != nil {
 		a.logger.ExitFn(1)
@@ -296,6 +309,13 @@ func (a adapter) newChainEntry(level port.Level, msg string) onelogpkg.ChainEntr
 	default:
 		return a.logger.InfoWith(msg)
 	}
+}
+
+func (a adapter) appendLogLevel(entry onelogpkg.ChainEntry) onelogpkg.ChainEntry {
+	if !a.includeLogLevel {
+		return entry
+	}
+	return entry.String("loglevel", port.LevelString(a.currentLevel()))
 }
 
 func addKeyvals(entry onelogpkg.ChainEntry, keyvals []any) onelogpkg.ChainEntry {
@@ -359,14 +379,28 @@ func (a adapter) WithAttrs(attrs []slog.Attr) slog.Handler {
 	base := make([]any, 0, len(a.baseKeyvals)+len(addition))
 	base = append(base, a.baseKeyvals...)
 	base = append(base, addition...)
-	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups, forcedLevel: a.forcedLevel, minLevel: a.minLevel}
+	return adapter{
+		logger:          a.logger,
+		baseKeyvals:     base,
+		groups:          a.groups,
+		forcedLevel:     a.forcedLevel,
+		minLevel:        a.minLevel,
+		includeLogLevel: a.includeLogLevel,
+	}
 }
 
 func (a adapter) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return a
 	}
-	return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: appendGroup(a.groups, name), forcedLevel: a.forcedLevel, minLevel: a.minLevel}
+	return adapter{
+		logger:          a.logger,
+		baseKeyvals:     a.baseKeyvals,
+		groups:          appendGroup(a.groups, name),
+		forcedLevel:     a.forcedLevel,
+		minLevel:        a.minLevel,
+		includeLogLevel: a.includeLogLevel,
+	}
 }
 
 func (a adapter) Enabled(_ context.Context, level slog.Level) bool {
@@ -385,6 +419,7 @@ func (a adapter) Handle(_ context.Context, record slog.Record) error {
 	entry = addKeyvals(entry, a.baseKeyvals)
 	keyvals := recordToKeyvals(record, a.groups)
 	entry = addKeyvals(entry, keyvals)
+	entry = a.appendLogLevel(entry)
 	entry.Write()
 	return nil
 }

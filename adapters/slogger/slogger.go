@@ -61,10 +61,11 @@ func ContextWithLogger(ctx context.Context, w io.Writer, opts Options) context.C
 }
 
 type adapter struct {
-	logger      *slog.Logger
-	handler     slog.Handler
-	forcedLevel *port.Level
-	minLevel    port.Level
+	logger          *slog.Logger
+	handler         slog.Handler
+	forcedLevel     *port.Level
+	minLevel        port.Level
+	includeLogLevel bool
 }
 
 func newAdapter(logger *slog.Logger, handler slog.Handler, min port.Level) port.ForLogging {
@@ -80,9 +81,9 @@ func newAdapter(logger *slog.Logger, handler slog.Handler, min port.Level) port.
 func (a adapter) LogLevel(level port.Level) port.ForLogging {
 	if level == port.NoLevel {
 		lvl := level
-		return adapter{logger: a.logger, handler: a.handler, forcedLevel: &lvl, minLevel: a.minLevel}
+		return adapter{logger: a.logger, handler: a.handler, forcedLevel: &lvl, minLevel: a.minLevel, includeLogLevel: a.includeLogLevel}
 	}
-	return adapter{logger: a.logger, handler: a.handler, minLevel: level}
+	return adapter{logger: a.logger, handler: a.handler, minLevel: level, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
@@ -93,7 +94,10 @@ func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
 }
 
 func (a adapter) WithLogLevel() port.ForLogging {
-	return a.With("loglevel", port.LevelString(a.currentLevel()))
+	if a.includeLogLevel {
+		return a
+	}
+	return adapter{logger: a.logger, handler: a.handler, forcedLevel: a.forcedLevel, minLevel: a.minLevel, includeLogLevel: true}
 }
 
 func (a adapter) With(keyvals ...any) port.ForLogging {
@@ -101,7 +105,7 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 		return a
 	}
 	next := a.logger.With(keyvals...)
-	return adapter{logger: next, handler: next.Handler(), forcedLevel: a.forcedLevel, minLevel: a.minLevel}
+	return adapter{logger: next, handler: next.Handler(), forcedLevel: a.forcedLevel, minLevel: a.minLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
@@ -119,6 +123,7 @@ func (a adapter) Log(ctx context.Context, level slog.Level, msg string, keyvals 
 	if !a.shouldLog(port.LevelFromSlog(level)) {
 		return
 	}
+	keyvals = a.appendLogLevelKeyvals(keyvals)
 	a.logger.Log(ctx, level, msg, keyvals...)
 }
 
@@ -126,6 +131,7 @@ func (a adapter) Logp(level port.Level, msg string, keyvals ...any) {
 	if !a.shouldLog(level) {
 		return
 	}
+	keyvals = a.appendLogLevelKeyvals(keyvals)
 	a.logger.Log(context.Background(), portLevelToSlog(level), msg, keyvals...)
 }
 
@@ -187,6 +193,13 @@ func (a adapter) currentLevel() port.Level {
 	return a.minLevel
 }
 
+func (a adapter) appendLogLevelKeyvals(keyvals []any) []any {
+	if !a.includeLogLevel {
+		return keyvals
+	}
+	return append(keyvals, "loglevel", port.LevelString(a.currentLevel()))
+}
+
 func (a adapter) shouldLog(level port.Level) bool {
 	if a.logger == nil {
 		return false
@@ -219,6 +232,9 @@ func (a adapter) Handle(ctx context.Context, record slog.Record) error {
 	if a.handler == nil {
 		return nil
 	}
+	if a.includeLogLevel {
+		record.AddAttrs(slog.String("loglevel", port.LevelString(a.currentLevel())))
+	}
 	return a.handler.Handle(ctx, record)
 }
 
@@ -227,7 +243,7 @@ func (a adapter) WithAttrs(attrs []slog.Attr) slog.Handler {
 		return a
 	}
 	next := a.handler.WithAttrs(attrs)
-	return adapter{logger: slog.New(next), handler: next, forcedLevel: a.forcedLevel, minLevel: a.minLevel}
+	return adapter{logger: slog.New(next), handler: next, forcedLevel: a.forcedLevel, minLevel: a.minLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func (a adapter) WithGroup(name string) slog.Handler {
@@ -235,7 +251,7 @@ func (a adapter) WithGroup(name string) slog.Handler {
 		return a
 	}
 	next := a.handler.WithGroup(name)
-	return adapter{logger: slog.New(next), handler: next, forcedLevel: a.forcedLevel, minLevel: a.minLevel}
+	return adapter{logger: slog.New(next), handler: next, forcedLevel: a.forcedLevel, minLevel: a.minLevel, includeLogLevel: a.includeLogLevel}
 }
 
 func portLevelToSlog(level port.Level) slog.Level {

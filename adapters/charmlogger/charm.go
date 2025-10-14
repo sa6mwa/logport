@@ -45,9 +45,10 @@ func ContextWithLogger(ctx context.Context, w io.Writer, o log.Options) context.
 }
 
 type charmAdapter struct {
-	logger      *log.Logger
-	groups      []string
-	forcedLevel *port.Level
+	logger          *log.Logger
+	groups          []string
+	forcedLevel     *port.Level
+	includeLogLevel bool
 }
 
 func (c charmAdapter) LogLevel(level port.Level) port.ForLogging {
@@ -56,11 +57,11 @@ func (c charmAdapter) LogLevel(level port.Level) port.ForLogging {
 	}
 	if level == port.NoLevel {
 		lvl := level
-		return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: &lvl}
+		return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: &lvl, includeLogLevel: c.includeLogLevel}
 	}
 	clone := c.logger.With()
 	clone.SetLevel(portLevelToCharm(level))
-	return charmAdapter{logger: clone, groups: c.groups}
+	return charmAdapter{logger: clone, groups: c.groups, includeLogLevel: c.includeLogLevel}
 }
 
 func (c charmAdapter) LogLevelFromEnv(key string) port.ForLogging {
@@ -71,7 +72,10 @@ func (c charmAdapter) LogLevelFromEnv(key string) port.ForLogging {
 }
 
 func (c charmAdapter) WithLogLevel() port.ForLogging {
-	return c.With("loglevel", port.LevelString(c.currentLevel()))
+	if c.includeLogLevel {
+		return c
+	}
+	return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: c.forcedLevel, includeLogLevel: true}
 }
 
 func (c charmAdapter) Log(_ context.Context, level slog.Level, msg string, keyvals ...any) {
@@ -127,13 +131,13 @@ func (c charmAdapter) currentLevel() port.Level {
 
 func (c charmAdapter) With(keyvals ...any) port.ForLogging {
 	if c.logger == nil || len(keyvals) == 0 {
-		return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: c.forcedLevel}
+		return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: c.forcedLevel, includeLogLevel: c.includeLogLevel}
 	}
 	normalized := normalizeCharmKeyvals(keyvals, nil)
 	if len(normalized) == 0 {
-		return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: c.forcedLevel}
+		return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: c.forcedLevel, includeLogLevel: c.includeLogLevel}
 	}
-	return charmAdapter{logger: c.logger.With(normalized...), groups: c.groups, forcedLevel: c.forcedLevel}
+	return charmAdapter{logger: c.logger.With(normalized...), groups: c.groups, forcedLevel: c.forcedLevel, includeLogLevel: c.includeLogLevel}
 }
 
 func (c charmAdapter) WithTrace(ctx context.Context) port.ForLogging {
@@ -144,12 +148,21 @@ func (c charmAdapter) WithTrace(ctx context.Context) port.ForLogging {
 	return c.With(keyvals...)
 }
 
+func (c charmAdapter) appendLogLevel(keyvals []any) []any {
+	if !c.includeLogLevel {
+		return keyvals
+	}
+	return append(keyvals, "loglevel", port.LevelString(c.currentLevel()))
+}
+
 func (c charmAdapter) Debug(msg string, keyvals ...any) {
 	if c.forceNoLevel() {
+		keyvals = c.appendLogLevel(keyvals)
 		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Print(msg, keyvals...)
 		return
 	}
+	keyvals = c.appendLogLevel(keyvals)
 	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Debug(msg, keyvals...)
 }
@@ -160,10 +173,12 @@ func (c charmAdapter) Debugf(format string, args ...any) {
 
 func (c charmAdapter) Info(msg string, keyvals ...any) {
 	if c.forceNoLevel() {
+		keyvals = c.appendLogLevel(keyvals)
 		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Print(msg, keyvals...)
 		return
 	}
+	keyvals = c.appendLogLevel(keyvals)
 	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Info(msg, keyvals...)
 }
@@ -174,10 +189,12 @@ func (c charmAdapter) Infof(format string, args ...any) {
 
 func (c charmAdapter) Warn(msg string, keyvals ...any) {
 	if c.forceNoLevel() {
+		keyvals = c.appendLogLevel(keyvals)
 		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Print(msg, keyvals...)
 		return
 	}
+	keyvals = c.appendLogLevel(keyvals)
 	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Warn(msg, keyvals...)
 }
@@ -188,10 +205,12 @@ func (c charmAdapter) Warnf(format string, args ...any) {
 
 func (c charmAdapter) Error(msg string, keyvals ...any) {
 	if c.forceNoLevel() {
+		keyvals = c.appendLogLevel(keyvals)
 		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Print(msg, keyvals...)
 		return
 	}
+	keyvals = c.appendLogLevel(keyvals)
 	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Error(msg, keyvals...)
 }
@@ -201,6 +220,7 @@ func (c charmAdapter) Errorf(format string, args ...any) {
 }
 
 func (c charmAdapter) Fatal(msg string, keyvals ...any) {
+	keyvals = c.appendLogLevel(keyvals)
 	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Fatal(msg, keyvals...)
 }
@@ -211,6 +231,7 @@ func (c charmAdapter) Fatalf(format string, args ...any) {
 
 func (c charmAdapter) Panic(msg string, keyvals ...any) {
 	if c.logger != nil {
+		keyvals = c.appendLogLevel(keyvals)
 		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Error(msg, keyvals...)
 	}
@@ -226,10 +247,12 @@ func (c charmAdapter) Trace(msg string, keyvals ...any) {
 		return
 	}
 	if c.forceNoLevel() {
+		keyvals = c.appendLogLevel(keyvals)
 		keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 		c.logger.Print(msg, keyvals...)
 		return
 	}
+	keyvals = c.appendLogLevel(keyvals)
 	keyvals = normalizeCharmKeyvals(keyvals, c.groups)
 	c.logger.Debug(msg, keyvals...)
 }
@@ -257,6 +280,9 @@ func (c charmAdapter) Handle(_ context.Context, record slog.Record) error {
 		return nil
 	}
 	keyvals := recordToKeyvals(record, c.groups)
+	if c.includeLogLevel {
+		keyvals = append(keyvals, "loglevel", port.LevelString(c.currentLevel()))
+	}
 	if c.forceNoLevel() {
 		c.logger.Print(record.Message, keyvals...)
 		return nil
@@ -281,7 +307,7 @@ func (c charmAdapter) WithAttrs(attrs []slog.Attr) slog.Handler {
 		return c
 	}
 	keyvals := attrsToKeyvals(attrs, c.groups)
-	return charmAdapter{logger: c.logger.With(keyvals...), groups: c.groups, forcedLevel: c.forcedLevel}
+	return charmAdapter{logger: c.logger.With(keyvals...), groups: c.groups, forcedLevel: c.forcedLevel, includeLogLevel: c.includeLogLevel}
 }
 
 func (c charmAdapter) WithGroup(name string) slog.Handler {
@@ -289,7 +315,7 @@ func (c charmAdapter) WithGroup(name string) slog.Handler {
 		return c
 	}
 	groups := appendGroup(c.groups, name)
-	return charmAdapter{logger: c.logger, groups: groups, forcedLevel: c.forcedLevel}
+	return charmAdapter{logger: c.logger, groups: groups, forcedLevel: c.forcedLevel, includeLogLevel: c.includeLogLevel}
 }
 
 func slogLevelToCharm(level slog.Level) log.Level {
