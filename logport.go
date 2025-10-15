@@ -98,30 +98,14 @@ type ForLogging interface {
 	// context carries a valid OpenTelemetry span.
 	WithTrace(ctx context.Context) ForLogging
 
-	// Log mirrors slog.Logger.Log and emits msg at the provided slog level using
-	// the supplied context and key/value pairs.
-	Log(ctx context.Context, level slog.Level, msg string, keyvals ...any)
+	ForLoggingSubset
 
 	// Logp emits msg at the supplied logport level.
 	Logp(level Level, msg string, keyvals ...any)
 
-	// Logs emits msg using the level encoded in the string. Unknown or empty
-	// values fall back to NoLevel semantics.
-	Logs(level string, msg string, keyvals ...any)
-
 	// Logf formats msg using fmt.Sprintf semantics and logs it at the supplied
 	// logport level.
 	Logf(level Level, format string, v ...any)
-
-	ForLoggingMinimalSubset
-
-	// Trace logs msg at TraceLevel (below DebugLevel).
-	Trace(msg string, keyvals ...any)
-	// Fatal logs msg at FatalLevel and terminates the process when the backend
-	// supports it.
-	Fatal(msg string, keyvals ...any)
-	// Panic logs msg at PanicLevel and panics when the backend supports it.
-	Panic(msg string, keyvals ...any)
 
 	// Debugf logs a formatted message at DebugLevel.
 	Debugf(format string, v ...any)
@@ -139,6 +123,10 @@ type ForLogging interface {
 	Tracef(format string, v ...any)
 }
 
+// ForLoggingMinimalSubset defines the smallest set of convenience methods that
+// library authors can require when they want consumers to plug in their own
+// logger. Callers can satisfy this interface with a bespoke implementation or
+// by reusing a logport adapter.
 type ForLoggingMinimalSubset interface {
 	// Debug logs msg at DebugLevel.
 	Debug(msg string, keyvals ...any)
@@ -148,6 +136,28 @@ type ForLoggingMinimalSubset interface {
 	Warn(msg string, keyvals ...any)
 	// Error logs msg at ErrorLevel.
 	Error(msg string, keyvals ...any)
+}
+
+// ForLoggingSubset extends the minimal contract with additional helpers for
+// libraries that need trace, panic, fatal, or slog-compatible logging while
+// still allowing API users to bring their own logger or any adapter that
+// implements these methods.
+type ForLoggingSubset interface {
+	ForLoggingMinimalSubset
+
+	// Trace logs msg at TraceLevel (below DebugLevel).
+	Trace(msg string, keyvals ...any)
+	// Fatal logs msg at FatalLevel and terminates the process when the backend
+	// supports it.
+	Fatal(msg string, keyvals ...any)
+	// Panic logs msg at PanicLevel and panics when the backend supports it.
+	Panic(msg string, keyvals ...any)
+	// Log mirrors slog.Logger.Log and emits msg at the provided slog level using
+	// the supplied context and key/value pairs.
+	Log(ctx context.Context, level slog.Level, msg string, keyvals ...any)
+	// Logs emits msg using the level encoded in the string. Unknown or empty
+	// values fall back to NoLevel semantics.
+	Logs(level string, msg string, keyvals ...any)
 }
 
 var DTGTimeFormat string = "021504"
