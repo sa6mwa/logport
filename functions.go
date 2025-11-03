@@ -29,9 +29,7 @@ func classifyLogLine(raw string) (Level, string) {
 	token, rest := splitLeadingToken(trimmed)
 	if level, ok := levelFromToken(token); ok {
 		msg := strings.TrimLeft(rest, " \t")
-		if strings.HasPrefix(msg, ":") {
-			msg = msg[1:]
-		}
+		msg = strings.TrimPrefix(msg, ":")
 		msg = strings.TrimLeft(msg, " \t-|:")
 		return level, strings.TrimSpace(msg)
 	}

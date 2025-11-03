@@ -9,14 +9,14 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	port "pkt.systems/logport"
+	logport "pkt.systems/logport"
 )
 
 type adapter struct {
 	logger          *zap.Logger
 	groups          []string
 	minLevel        *zapcore.Level
-	configuredLevel *port.Level
+	configuredLevel *logport.Level
 	includeLogLevel bool
 }
 
@@ -48,31 +48,31 @@ type Options struct {
 
 // New returns a zap-backed ForLogging implementation that writes JSON logs to
 // the provided writer using sensible defaults.
-func New(w io.Writer) port.ForLogging {
+func New(w io.Writer) logport.ForLogging {
 	return NewWithOptions(w, Options{})
 }
 
 // NewWithOptions returns a zap-backed ForLogging implementation with custom
 // configuration applied.
-func NewWithOptions(w io.Writer, opts Options) port.ForLogging {
+func NewWithOptions(w io.Writer, opts Options) logport.ForLogging {
 	logger := buildLogger(w, opts)
 	if logger == nil {
-		return port.NoopLogger()
+		return logport.NoopLogger()
 	}
 	return adapter{logger: logger}
 }
 
-// NewFromLogger wraps an existing zap.Logger so it satisfies port.ForLogging.
-func NewFromLogger(logger *zap.Logger) port.ForLogging {
+// NewFromLogger wraps an existing zap.Logger so it satisfies logport.ForLogging.
+func NewFromLogger(logger *zap.Logger) logport.ForLogging {
 	if logger == nil {
-		return port.NoopLogger()
+		return logport.NoopLogger()
 	}
 	return adapter{logger: logger}
 }
 
 // ContextWithLogger installs a zap-backed logger into the supplied context.
 func ContextWithLogger(ctx context.Context, w io.Writer, opts Options) context.Context {
-	return port.ContextWithLogger(ctx, NewWithOptions(w, opts))
+	return logport.ContextWithLogger(ctx, NewWithOptions(w, opts))
 }
 
 func buildLogger(w io.Writer, opts Options) *zap.Logger {
@@ -103,7 +103,7 @@ func buildLogger(w io.Writer, opts Options) *zap.Logger {
 	return logger
 }
 
-func (a adapter) With(keyvals ...any) port.ForLogging {
+func (a adapter) With(keyvals ...any) logport.ForLogging {
 	if a.logger == nil || len(keyvals) == 0 {
 		return a
 	}
@@ -114,26 +114,26 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	return adapter{logger: a.logger.With(fields...), groups: a.groups, minLevel: a.minLevel, configuredLevel: a.configuredLevel, includeLogLevel: a.includeLogLevel}
 }
 
-func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
-	keyvals := port.TraceKeyvalsFromContext(ctx)
+func (a adapter) WithTrace(ctx context.Context) logport.ForLogging {
+	keyvals := logport.TraceKeyvalsFromContext(ctx)
 	if len(keyvals) == 0 {
 		return a
 	}
 	return a.With(keyvals...)
 }
 
-func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
-	if level, ok := port.LevelFromEnv(key); ok {
+func (a adapter) LogLevelFromEnv(key string) logport.ForLogging {
+	if level, ok := logport.LevelFromEnv(key); ok {
 		return a.LogLevel(level)
 	}
 	return a
 }
 
-func (a adapter) LogLevel(level port.Level) port.ForLogging {
+func (a adapter) LogLevel(level logport.Level) logport.ForLogging {
 	if a.logger == nil {
 		return a
 	}
-	if level == port.NoLevel {
+	if level == logport.NoLevel {
 		lvl := zapcore.DebugLevel
 		configured := level
 		return adapter{logger: a.logger, groups: a.groups, minLevel: &lvl, configuredLevel: &configured, includeLogLevel: a.includeLogLevel}
@@ -143,7 +143,7 @@ func (a adapter) LogLevel(level port.Level) port.ForLogging {
 	return adapter{logger: a.logger, groups: a.groups, minLevel: &zapLevel, configuredLevel: &configured, includeLogLevel: a.includeLogLevel}
 }
 
-func (a adapter) WithLogLevel() port.ForLogging {
+func (a adapter) WithLogLevel() logport.ForLogging {
 	if a.includeLogLevel {
 		return a
 	}
@@ -151,26 +151,26 @@ func (a adapter) WithLogLevel() port.ForLogging {
 }
 
 func (a adapter) Log(ctx context.Context, level slog.Level, msg string, keyvals ...any) {
-	a.Logp(port.LevelFromSlog(level), msg, keyvals...)
+	a.Logp(logport.LevelFromSlog(level), msg, keyvals...)
 }
 
-func (a adapter) Logp(level port.Level, msg string, keyvals ...any) {
+func (a adapter) Logp(level logport.Level, msg string, keyvals ...any) {
 	switch level {
-	case port.TraceLevel, port.DebugLevel:
+	case logport.TraceLevel, logport.DebugLevel:
 		a.Debug(msg, keyvals...)
-	case port.InfoLevel:
+	case logport.InfoLevel:
 		a.Info(msg, keyvals...)
-	case port.WarnLevel:
+	case logport.WarnLevel:
 		a.Warn(msg, keyvals...)
-	case port.ErrorLevel:
+	case logport.ErrorLevel:
 		a.Error(msg, keyvals...)
-	case port.FatalLevel:
+	case logport.FatalLevel:
 		a.Fatal(msg, keyvals...)
-	case port.PanicLevel:
+	case logport.PanicLevel:
 		a.Panic(msg, keyvals...)
-	case port.NoLevel:
+	case logport.NoLevel:
 		a.Debug(msg, keyvals...)
-	case port.Disabled:
+	case logport.Disabled:
 		return
 	default:
 		a.Info(msg, keyvals...)
@@ -178,14 +178,14 @@ func (a adapter) Logp(level port.Level, msg string, keyvals ...any) {
 }
 
 func (a adapter) Logs(level string, msg string, keyvals ...any) {
-	if lvl, ok := port.ParseLevel(level); ok {
+	if lvl, ok := logport.ParseLevel(level); ok {
 		a.Logp(lvl, msg, keyvals...)
 		return
 	}
-	a.Logp(port.NoLevel, msg, keyvals...)
+	a.Logp(logport.NoLevel, msg, keyvals...)
 }
 
-func (a adapter) Logf(level port.Level, format string, args ...any) {
+func (a adapter) Logf(level logport.Level, format string, args ...any) {
 	a.Logp(level, formatMessage(format, args...))
 }
 
@@ -193,7 +193,7 @@ func (a adapter) Debug(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
 	}
-	if !a.shouldLog(port.DebugLevel) {
+	if !a.shouldLog(logport.DebugLevel) {
 		return
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
@@ -209,7 +209,7 @@ func (a adapter) Info(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
 	}
-	if !a.shouldLog(port.InfoLevel) {
+	if !a.shouldLog(logport.InfoLevel) {
 		return
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
@@ -225,7 +225,7 @@ func (a adapter) Warn(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
 	}
-	if !a.shouldLog(port.WarnLevel) {
+	if !a.shouldLog(logport.WarnLevel) {
 		return
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
@@ -241,7 +241,7 @@ func (a adapter) Error(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
 	}
-	if !a.shouldLog(port.ErrorLevel) {
+	if !a.shouldLog(logport.ErrorLevel) {
 		return
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
@@ -283,7 +283,7 @@ func (a adapter) Trace(msg string, keyvals ...any) {
 	if a.logger == nil {
 		return
 	}
-	if !a.shouldLog(port.TraceLevel) {
+	if !a.shouldLog(logport.TraceLevel) {
 		return
 	}
 	fields := keyvalsToFields(a.groups, keyvals)
@@ -296,7 +296,7 @@ func (a adapter) Tracef(format string, args ...any) {
 }
 
 func (a adapter) Write(p []byte) (int, error) {
-	return port.WriteToLogger(a, p)
+	return logport.WriteToLogger(a, p)
 }
 
 func (a adapter) Enabled(_ context.Context, level slog.Level) bool {
@@ -361,21 +361,21 @@ func slogLevelToZap(level slog.Level) zapcore.Level {
 	}
 }
 
-func (a adapter) currentLevel() port.Level {
+func (a adapter) currentLevel() logport.Level {
 	if a.configuredLevel != nil {
 		return *a.configuredLevel
 	}
 	if a.minLevel != nil {
 		return zapLevelToPort(*a.minLevel)
 	}
-	return port.InfoLevel
+	return logport.InfoLevel
 }
 
 func (a adapter) appendLogLevelField(fields []zap.Field) []zap.Field {
 	if !a.includeLogLevel {
 		return fields
 	}
-	return append(fields, zap.String("loglevel", port.LevelString(a.currentLevel())))
+	return append(fields, zap.String("loglevel", logport.LevelString(a.currentLevel())))
 }
 
 func keyvalsToFields(groups []string, keyvals []any) []zap.Field {
@@ -413,24 +413,24 @@ func keyvalsToFields(groups []string, keyvals []any) []zap.Field {
 	return fields
 }
 
-func zapLevelToPort(level zapcore.Level) port.Level {
+func zapLevelToPort(level zapcore.Level) logport.Level {
 	switch level {
 	case zapcore.DebugLevel:
-		return port.DebugLevel
+		return logport.DebugLevel
 	case zapcore.InfoLevel:
-		return port.InfoLevel
+		return logport.InfoLevel
 	case zapcore.WarnLevel:
-		return port.WarnLevel
+		return logport.WarnLevel
 	case zapcore.ErrorLevel:
-		return port.ErrorLevel
+		return logport.ErrorLevel
 	case zapcore.DPanicLevel, zapcore.FatalLevel:
-		return port.FatalLevel
+		return logport.FatalLevel
 	case zapcore.PanicLevel:
-		return port.PanicLevel
+		return logport.PanicLevel
 	case zapcore.InvalidLevel:
-		return port.Disabled
+		return logport.Disabled
 	default:
-		return port.InfoLevel
+		return logport.InfoLevel
 	}
 }
 
@@ -497,7 +497,7 @@ func joinKey(groups []string, key string) string {
 	return strings.Join(parts, ".")
 }
 
-func (a adapter) shouldLog(level port.Level) bool {
+func (a adapter) shouldLog(level logport.Level) bool {
 	if a.logger == nil {
 		return false
 	}
@@ -515,25 +515,25 @@ func formatMessage(format string, args ...any) string {
 	return fmt.Sprintf(format, args...)
 }
 
-func portLevelToZap(level port.Level) zapcore.Level {
+func portLevelToZap(level logport.Level) zapcore.Level {
 	switch level {
-	case port.TraceLevel, port.DebugLevel, port.NoLevel:
+	case logport.TraceLevel, logport.DebugLevel, logport.NoLevel:
 		return zapcore.DebugLevel
-	case port.InfoLevel:
+	case logport.InfoLevel:
 		return zapcore.InfoLevel
-	case port.WarnLevel:
+	case logport.WarnLevel:
 		return zapcore.WarnLevel
-	case port.ErrorLevel:
+	case logport.ErrorLevel:
 		return zapcore.ErrorLevel
-	case port.FatalLevel:
+	case logport.FatalLevel:
 		return zapcore.FatalLevel
-	case port.PanicLevel:
+	case logport.PanicLevel:
 		return zapcore.PanicLevel
-	case port.Disabled:
+	case logport.Disabled:
 		return zapcore.InvalidLevel
 	default:
 		return zapcore.InfoLevel
 	}
 }
 
-var _ port.ForLogging = adapter{}
+var _ logport.ForLogging = adapter{}

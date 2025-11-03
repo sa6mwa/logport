@@ -6,17 +6,18 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
-	port "pkt.systems/logport"
+	logport "pkt.systems/logport"
 )
 
 type adapter struct {
 	logger          zerolog.Logger
 	groups          []string
-	forcedLevel     *port.Level
+	forcedLevel     *logport.Level
 	includeLogLevel bool
 }
 
@@ -25,7 +26,7 @@ type Options struct {
 	// ConfigureWriter allows callers to modify the zerolog.ConsoleWriter that is
 	// created for the adapter. The supplied writer already has Out set to the
 	// io.Writer provided to NewWithOptions and uses the Options' TimeFormat (which
-	// defaults to port.DTGTimeFormat).
+	// defaults to logport.DTGTimeFormat).
 	ConfigureWriter func(*zerolog.ConsoleWriter)
 
 	// Level, when non-nil, sets the minimum level for the adapter's logger.
@@ -36,7 +37,7 @@ type Options struct {
 	// terminal.
 	NoColor bool
 
-	// TimeFormat according to time.Time, default is port.DTGTimeFormat.
+	// TimeFormat according to time.Time, default is logport.DTGTimeFormat.
 	TimeFormat string
 
 	// DisableTimestamp skips attaching timestamp to every log entry.
@@ -85,28 +86,29 @@ func (o *Options) UnmarshalJSON(data []byte) error {
 
 // New returns a zerolog-backed ForLogging implementation with sensible
 // defaults that produce zerolog's familiar colored console output.
-func New(w io.Writer) port.ForLogging {
+func New(w io.Writer) logport.ForLogging {
 	return NewWithOptions(w, Options{})
 }
 
 // NewStructured returns a zerolog-backed ForLogging implementation that writes
 // structured JSON to the supplied writer.
-func NewStructured(w io.Writer) port.ForLogging {
+func NewStructured(w io.Writer) logport.ForLogging {
 	return NewWithOptions(w, Options{Structured: true})
 }
 
-func NewFromLogger(logger zerolog.Logger) port.ForLogging {
+// NewFromLogger wraps an existing zerolog logger in the logport adapter.
+func NewFromLogger(logger zerolog.Logger) logport.ForLogging {
 	return adapter{logger: logger}
 }
 
 // NewWithOptions returns a zerolog-backed ForLogging implementation using the
 // supplied writer and options. The default behaviour is console-friendly output;
 // set Options.Structured to true for JSON emission.
-func NewWithOptions(w io.Writer, o Options) port.ForLogging {
+func NewWithOptions(w io.Writer, o Options) logport.ForLogging {
 	useConsole := !o.Structured
 	if useConsole {
 		if o.TimeFormat == "" {
-			o.TimeFormat = port.DTGTimeFormat
+			o.TimeFormat = logport.DTGTimeFormat
 		}
 		noColor := o.NoColor || !isTerminal(w)
 		writer := zerolog.ConsoleWriter{
@@ -142,10 +144,10 @@ func NewWithOptions(w io.Writer, o Options) port.ForLogging {
 
 // ContextWithLogger returns a new context carrying a zerolog-backed logger.
 func ContextWithLogger(ctx context.Context, w io.Writer, opts Options) context.Context {
-	return port.ContextWithLogger(ctx, NewWithOptions(w, opts))
+	return logport.ContextWithLogger(ctx, NewWithOptions(w, opts))
 }
 
-func (a adapter) With(keyvals ...any) port.ForLogging {
+func (a adapter) With(keyvals ...any) logport.ForLogging {
 	if len(keyvals) == 0 {
 		return a
 	}
@@ -156,30 +158,30 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	return adapter{logger: ctx.Logger(), groups: a.groups, forcedLevel: a.forcedLevel, includeLogLevel: a.includeLogLevel}
 }
 
-func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
-	keyvals := port.TraceKeyvalsFromContext(ctx)
+func (a adapter) WithTrace(ctx context.Context) logport.ForLogging {
+	keyvals := logport.TraceKeyvalsFromContext(ctx)
 	if len(keyvals) == 0 {
 		return a
 	}
 	return a.With(keyvals...)
 }
 
-func (a adapter) WithLogLevel() port.ForLogging {
+func (a adapter) WithLogLevel() logport.ForLogging {
 	if a.includeLogLevel {
 		return a
 	}
 	return adapter{logger: a.logger, groups: a.groups, forcedLevel: a.forcedLevel, includeLogLevel: true}
 }
 
-func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
-	if level, ok := port.LevelFromEnv(key); ok {
+func (a adapter) LogLevelFromEnv(key string) logport.ForLogging {
+	if level, ok := logport.LevelFromEnv(key); ok {
 		return a.LogLevel(level)
 	}
 	return a
 }
 
-func (a adapter) LogLevel(level port.Level) port.ForLogging {
-	if level == port.NoLevel {
+func (a adapter) LogLevel(level logport.Level) logport.ForLogging {
+	if level == logport.NoLevel {
 		lvl := level
 		return adapter{logger: a.logger, groups: a.groups, forcedLevel: &lvl, includeLogLevel: a.includeLogLevel}
 	}
@@ -194,28 +196,28 @@ func (a adapter) Debug(msg string, keyvals ...any) {
 }
 
 func (a adapter) Log(_ context.Context, level slog.Level, msg string, keyvals ...any) {
-	a.Logp(port.LevelFromSlog(level), msg, keyvals...)
+	a.Logp(logport.LevelFromSlog(level), msg, keyvals...)
 }
 
-func (a adapter) Logp(level port.Level, msg string, keyvals ...any) {
+func (a adapter) Logp(level logport.Level, msg string, keyvals ...any) {
 	switch level {
-	case port.TraceLevel:
+	case logport.TraceLevel:
 		a.Trace(msg, keyvals...)
-	case port.DebugLevel:
+	case logport.DebugLevel:
 		a.Debug(msg, keyvals...)
-	case port.InfoLevel:
+	case logport.InfoLevel:
 		a.Info(msg, keyvals...)
-	case port.WarnLevel:
+	case logport.WarnLevel:
 		a.Warn(msg, keyvals...)
-	case port.ErrorLevel:
+	case logport.ErrorLevel:
 		a.Error(msg, keyvals...)
-	case port.FatalLevel:
+	case logport.FatalLevel:
 		a.Fatal(msg, keyvals...)
-	case port.PanicLevel:
+	case logport.PanicLevel:
 		a.Panic(msg, keyvals...)
-	case port.NoLevel:
+	case logport.NoLevel:
 		a.logNoLevel(msg, keyvals...)
-	case port.Disabled:
+	case logport.Disabled:
 		return
 	default:
 		a.Info(msg, keyvals...)
@@ -223,14 +225,14 @@ func (a adapter) Logp(level port.Level, msg string, keyvals ...any) {
 }
 
 func (a adapter) Logs(level string, msg string, keyvals ...any) {
-	if lvl, ok := port.ParseLevel(level); ok {
+	if lvl, ok := logport.ParseLevel(level); ok {
 		a.Logp(lvl, msg, keyvals...)
 		return
 	}
-	a.Logp(port.NoLevel, msg, keyvals...)
+	a.Logp(logport.NoLevel, msg, keyvals...)
 }
 
-func (a adapter) Logf(level port.Level, format string, args ...any) {
+func (a adapter) Logf(level logport.Level, format string, args ...any) {
 	a.Logp(level, formatMessage(format, args...))
 }
 
@@ -311,21 +313,19 @@ func (a adapter) Tracef(format string, args ...any) {
 }
 
 func (a adapter) Write(p []byte) (int, error) {
-	return port.WriteToLogger(a, p)
+	return logport.WriteToLogger(a, p)
 }
 
 func (a adapter) addLogLevel(event *zerolog.Event) {
 	if event == nil || !a.includeLogLevel {
 		return
 	}
-	event.Str("loglevel", port.LevelString(a.currentLevel()))
+	event.Str("loglevel", logport.LevelString(a.currentLevel()))
 }
 
 func appendUnique(parts []string, part string) []string {
-	for _, existing := range parts {
-		if existing == part {
-			return parts
-		}
+	if slices.Contains(parts, part) {
+		return parts
 	}
 	return append(parts, part)
 }
@@ -386,58 +386,114 @@ func addFields(event *zerolog.Event, keyvals []any, groups []string) {
 	if event == nil || len(keyvals) == 0 {
 		return
 	}
-	fields := fieldsFromKeyvals(keyvals, groups)
-	for key, value := range fields {
-		switch v := value.(type) {
-		case error:
-			event.AnErr(key, v)
-		case fmt.Stringer:
-			event.Stringer(key, v)
-		case bool:
-			event.Bool(key, v)
-		case int:
-			event.Int(key, v)
-		case int8:
-			event.Int8(key, v)
-		case int16:
-			event.Int16(key, v)
-		case int32:
-			event.Int32(key, v)
-		case int64:
-			event.Int64(key, v)
-		case uint:
-			event.Uint(key, v)
-		case uint8:
-			event.Uint8(key, v)
-		case uint16:
-			event.Uint16(key, v)
-		case uint32:
-			event.Uint32(key, v)
-		case uint64:
-			event.Uint64(key, v)
-		case float32:
-			event.Float32(key, v)
-		case float64:
-			event.Float64(key, v)
-		case time.Time:
-			event.Time(key, v)
-		case time.Duration:
-			event.Dur(key, v)
-		case string:
-			event.Str(key, v)
-		case []byte:
-			event.Bytes(key, v)
-		case zerolog.LogObjectMarshaler:
-			event.Object(key, v)
-		case zerolog.LogArrayMarshaler:
-			event.Array(key, v)
+	appendFields(event, keyvals, groups, 0)
+}
+
+func appendFields(event *zerolog.Event, keyvals []any, groups []string, argIndex int) int {
+	for i := 0; i < len(keyvals); {
+		switch v := keyvals[i].(type) {
+		case slog.Attr:
+			argIndex = appendAttr(event, v, groups, argIndex)
+			i++
+		case []slog.Attr:
+			for _, attr := range v {
+				argIndex = appendAttr(event, attr, groups, argIndex)
+			}
+			i++
 		default:
-			event.Interface(key, v)
+			if i+1 >= len(keyvals) {
+				key := fmt.Sprintf("arg%d", argIndex)
+				writeField(event, key, v)
+				argIndex++
+				i++
+				continue
+			}
+			key := keyToString(v)
+			if len(groups) > 0 {
+				key = joinAttrKey(groups, key)
+			}
+			writeField(event, key, keyvals[i+1])
+			argIndex++
+			i += 2
 		}
+	}
+	return argIndex
+}
+
+func appendAttr(event *zerolog.Event, attr slog.Attr, groups []string, argIndex int) int {
+	attr.Value = attr.Value.Resolve()
+	if attr.Value.Kind() == slog.KindGroup {
+		subGroups := groups
+		if attr.Key != "" {
+			subGroups = appendGroup(groups, attr.Key)
+		}
+		for _, nested := range attr.Value.Group() {
+			argIndex = appendAttr(event, nested, subGroups, argIndex)
+		}
+		return argIndex
+	}
+	key := joinAttrKey(groups, attr.Key)
+	writeField(event, key, attr.Value.Any())
+	return argIndex + 1
+}
+
+func writeField(event *zerolog.Event, key string, value any) {
+	switch v := value.(type) {
+	case error:
+		event.AnErr(key, v)
+	case time.Time:
+		event.Time(key, v)
+	case time.Duration:
+		event.Dur(key, v)
+	case fmt.Stringer:
+		event.Stringer(key, v)
+	case bool:
+		event.Bool(key, v)
+	case int:
+		event.Int(key, v)
+	case int8:
+		event.Int8(key, v)
+	case int16:
+		event.Int16(key, v)
+	case int32:
+		event.Int32(key, v)
+	case int64:
+		event.Int64(key, v)
+	case uint:
+		event.Uint(key, v)
+	case uint8:
+		event.Uint8(key, v)
+	case uint16:
+		event.Uint16(key, v)
+	case uint32:
+		event.Uint32(key, v)
+	case uint64:
+		event.Uint64(key, v)
+	case float32:
+		event.Float32(key, v)
+	case float64:
+		event.Float64(key, v)
+	case string:
+		event.Str(key, v)
+	case []byte:
+		event.Bytes(key, v)
+	case zerolog.LogObjectMarshaler:
+		event.Object(key, v)
+	case zerolog.LogArrayMarshaler:
+		event.Array(key, v)
+	default:
+		event.Interface(key, v)
 	}
 }
 
-var _ port.ForLogging = adapter{}
+func keyToString(key any) string {
+	if s, ok := key.(string); ok {
+		return s
+	}
+	return fmt.Sprint(key)
+}
+
+var _ logport.ForLogging = adapter{}
 
 func (a adapter) Enabled(_ context.Context, level slog.Level) bool {
 	if a.forceNoLevel() {
@@ -552,60 +608,60 @@ func joinAttrKey(groups []string, key string) string {
 	return strings.Join(parts, ".")
 }
 
-func (a adapter) currentLevel() port.Level {
+func (a adapter) currentLevel() logport.Level {
 	if a.forcedLevel != nil {
 		return *a.forcedLevel
 	}
 	return zerologLevelToPort(a.logger.GetLevel())
 }
 
-func portLevelToZero(level port.Level) zerolog.Level {
+func portLevelToZero(level logport.Level) zerolog.Level {
 	switch level {
-	case port.TraceLevel:
+	case logport.TraceLevel:
 		return zerolog.TraceLevel
-	case port.NoLevel:
+	case logport.NoLevel:
 		return zerolog.NoLevel
-	case port.DebugLevel:
+	case logport.DebugLevel:
 		return zerolog.DebugLevel
-	case port.InfoLevel:
+	case logport.InfoLevel:
 		return zerolog.InfoLevel
-	case port.WarnLevel:
+	case logport.WarnLevel:
 		return zerolog.WarnLevel
-	case port.ErrorLevel:
+	case logport.ErrorLevel:
 		return zerolog.ErrorLevel
-	case port.FatalLevel:
+	case logport.FatalLevel:
 		return zerolog.FatalLevel
-	case port.PanicLevel:
+	case logport.PanicLevel:
 		return zerolog.PanicLevel
-	case port.Disabled:
+	case logport.Disabled:
 		return zerolog.Disabled
 	default:
 		return zerolog.InfoLevel
 	}
 }
 
-func zerologLevelToPort(level zerolog.Level) port.Level {
+func zerologLevelToPort(level zerolog.Level) logport.Level {
 	switch level {
 	case zerolog.TraceLevel:
-		return port.TraceLevel
+		return logport.TraceLevel
 	case zerolog.DebugLevel:
-		return port.DebugLevel
+		return logport.DebugLevel
 	case zerolog.InfoLevel:
-		return port.InfoLevel
+		return logport.InfoLevel
 	case zerolog.WarnLevel:
-		return port.WarnLevel
+		return logport.WarnLevel
 	case zerolog.ErrorLevel:
-		return port.ErrorLevel
+		return logport.ErrorLevel
 	case zerolog.FatalLevel:
-		return port.FatalLevel
+		return logport.FatalLevel
 	case zerolog.PanicLevel:
-		return port.PanicLevel
+		return logport.PanicLevel
 	case zerolog.NoLevel:
-		return port.NoLevel
+		return logport.NoLevel
 	case zerolog.Disabled:
-		return port.Disabled
+		return logport.Disabled
 	default:
-		return port.InfoLevel
+		return logport.InfoLevel
 	}
 }
 
@@ -630,7 +686,7 @@ func (a adapter) newEvent(level zerolog.Level) *zerolog.Event {
 }
 
 func (a adapter) forceNoLevel() bool {
-	return a.forcedLevel != nil && *a.forcedLevel == port.NoLevel
+	return a.forcedLevel != nil && *a.forcedLevel == logport.NoLevel
 }
 
 func (a adapter) logNoLevel(msg string, keyvals ...any) {

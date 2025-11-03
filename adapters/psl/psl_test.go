@@ -1,130 +1,146 @@
-package psl_test
+package psl
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"log"
-	"strings"
+	"log/slog"
 	"testing"
 	"time"
 
-	port "pkt.systems/logport"
-	"pkt.systems/logport/adapters/psl"
+	"go.opentelemetry.io/otel/trace"
+
+	logport "pkt.systems/logport"
 )
 
-func TestConsoleOutputMatchesFormat(t *testing.T) {
-	var buf bytes.Buffer
-	logger := psl.NewWithOptions(&buf, psl.Options{Mode: psl.ModeConsole, DisableTimestamp: true, NoColor: true})
-	logger.Info("ready", "foo", "bar", "greeting", "hello world")
+func TestInfoAddsFields(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewWithOptions(buf, Options{Mode: ModeStructured, DisableTimestamp: true, NoColor: true})
 
-	got := strings.TrimSpace(buf.String())
-	expected := "INF ready foo=bar greeting=\"hello world\""
-	if got != expected {
-		t.Fatalf("unexpected output: got %q want %q", got, expected)
+	logger.Info("builder",
+		"component", "worker",
+		"attempt", int64(2),
+		"cached", true,
+	)
+
+	record := decodeLastJSONLine(t, buf.Bytes())
+	if got := record["lvl"]; got != "info" {
+		t.Fatalf("expected lvl=info, got %v", got)
+	}
+	if got := record["msg"]; got != "builder" {
+		t.Fatalf("expected msg=builder, got %v", got)
+	}
+	if got := record["component"]; got != "worker" {
+		t.Fatalf("expected component=worker, got %v", got)
+	}
+	if got := record["attempt"]; got != float64(2) {
+		t.Fatalf("expected attempt=2, got %v", got)
+	}
+	if got := record["cached"]; got != true {
+		t.Fatalf("expected cached=true, got %v", got)
 	}
 }
 
-func TestStructuredOutputJSON(t *testing.T) {
-	var buf bytes.Buffer
-	logger := psl.NewWithOptions(&buf, psl.Options{Mode: psl.ModeStructured, DisableTimestamp: true})
-	logger.Warn("boom", "count", 3)
+func TestWithLogLevelIncludesField(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewWithOptions(buf, Options{Mode: ModeStructured, DisableTimestamp: true, NoColor: true}).
+		LogLevel(logport.WarnLevel).
+		WithLogLevel()
 
-	line := strings.TrimSpace(buf.String())
-	if strings.Contains(line, "\x1b") {
-		t.Fatalf("unexpected color codes in JSON: %q", line)
+	logger.Warn("preflight")
+
+	record := decodeLastJSONLine(t, buf.Bytes())
+	if got := record["loglevel"]; got != "warn" {
+		t.Fatalf("expected loglevel=warn, got %v", got)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(line), &payload); err != nil {
-		t.Fatalf("failed to decode json: %v", err)
+}
+
+func TestLogLevelFilters(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewWithOptions(buf, Options{Mode: ModeStructured, DisableTimestamp: true, NoColor: true}).LogLevel(logport.ErrorLevel)
+
+	logger.Info("ignored")
+	if buf.Len() != 0 {
+		t.Fatalf("expected info to be filtered, got output %q", buf.String())
 	}
-	if payload["msg"] != "boom" {
-		t.Fatalf("expected msg boom, got %v", payload["msg"])
+
+	logger.Error("emitted", "code", 500)
+
+	record := decodeLastJSONLine(t, buf.Bytes())
+	if got := record["msg"]; got != "emitted" {
+		t.Fatalf("expected msg=emitted, got %v", got)
 	}
-	lvl, ok := payload["lvl"]
+	if got := record["code"]; got != float64(500) {
+		t.Fatalf("expected code=500, got %v", got)
+	}
+}
+
+func TestSlogWithGroup(t *testing.T) {
+	buf := &bytes.Buffer{}
+	raw := NewWithOptions(buf, Options{Mode: ModeStructured, DisableTimestamp: true, NoColor: true})
+
+	handler, ok := any(raw).(slog.Handler)
 	if !ok {
-		t.Fatalf("expected lvl field, payload=%v", payload)
+		t.Fatalf("expected logger to implement slog.Handler")
 	}
-	if lvl != "warn" {
-		t.Fatalf("expected lvl warn, got %v", lvl)
-	}
-	if payload["count"] != float64(3) {
-		t.Fatalf("expected count 3, got %v", payload["count"])
-	}
-}
 
-func TestStructuredVerboseFields(t *testing.T) {
-	var buf bytes.Buffer
-	logger := psl.NewWithOptions(&buf, psl.Options{Mode: psl.ModeStructured, DisableTimestamp: true, VerboseFields: true})
-	logger.Info("hello")
-
-	line := strings.TrimSpace(buf.String())
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(line), &payload); err != nil {
-		t.Fatalf("failed to decode json: %v", err)
-	}
-	if payload["message"] != "hello" {
-		t.Fatalf("expected message hello, got %v", payload["message"])
-	}
-	if payload["level"] != "info" {
-		t.Fatalf("expected level info, got %v", payload["level"])
-	}
-	if _, ok := payload["msg"]; ok {
-		t.Fatalf("unexpected short field present, payload=%v", payload)
-	}
-	if _, ok := payload["ts"]; ok {
-		t.Fatalf("unexpected ts field when timestamps disabled, payload=%v", payload)
-	}
-}
-
-func TestColorJSONDisabledOnNonTerminal(t *testing.T) {
-	var buf bytes.Buffer
-	logger := psl.NewWithOptions(&buf, psl.Options{Mode: psl.ModeStructured, DisableTimestamp: true, ColorJSON: true})
-	logger.Info("msg")
-	if strings.Contains(buf.String(), "\x1b") {
-		t.Fatalf("expected no colors on non-terminal writer, got %q", buf.String())
-	}
-}
-
-func TestWithAndMinimalSubset(t *testing.T) {
-	var buf bytes.Buffer
-	logger := psl.NewWithOptions(&buf, psl.Options{Mode: psl.ModeConsole, DisableTimestamp: true, NoColor: true}).With("app", "demo")
-	logger.(port.ForLoggingMinimalSubset).Info("up")
-	got := strings.TrimSpace(buf.String())
-	if !strings.Contains(got, "app=demo") {
-		t.Fatalf("expected base field in output, got %q", got)
-	}
-}
-
-func TestLogLoggerBridgePSL(t *testing.T) {
-	var buf bytes.Buffer
-	std := log.New(psl.NewWithOptions(&buf, psl.Options{Mode: psl.ModeConsole, DisableTimestamp: true, NoColor: true}), "", 0)
-	std.Println("[INFO] bridge")
-	if !strings.Contains(buf.String(), "bridge") {
-		t.Fatalf("bridge output missing message: %q", buf.String())
-	}
-}
-
-func TestConsoleUTCOption(t *testing.T) {
-	var buf bytes.Buffer
-	logger := psl.NewWithOptions(&buf, psl.Options{
-		Mode:       psl.ModeConsole,
-		TimeFormat: time.RFC3339,
-		NoColor:    true,
-		UTC:        true,
+	logger := handler.WithGroup("request").WithAttrs([]slog.Attr{
+		slog.String("tenant", "enterprise"),
 	})
-	logger.Info("utc-test")
 
-	line := strings.TrimSpace(buf.String())
-	parts := strings.SplitN(line, " ", 2)
-	if len(parts) == 0 {
-		t.Fatalf("expected timestamp in output, got %q", line)
+	record := slog.NewRecord(time.Unix(0, 0), slog.LevelInfo, "handled", 0)
+	record.Add("id", "abc123")
+
+	if err := logger.Handle(context.Background(), record); err != nil {
+		t.Fatalf("handle failed: %v", err)
 	}
-	ts := parts[0]
-	parsed, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		t.Fatalf("failed to parse timestamp %q: %v", ts, err)
+
+	decoded := decodeLastJSONLine(t, buf.Bytes())
+	if got := decoded["request.id"]; got != "abc123" {
+		t.Fatalf("expected request.id=abc123, got %v", got)
 	}
-	if parsed.Location().String() != "UTC" {
-		t.Fatalf("expected UTC timestamp, got %q (location=%s)", ts, parsed.Location())
+	if got := decoded["request.tenant"]; got != "enterprise" {
+		t.Fatalf("expected request.tenant=enterprise, got %v", got)
 	}
+}
+
+func TestWithTraceAddsTraceIDs(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewWithOptions(buf, Options{Mode: ModeStructured, DisableTimestamp: true, NoColor: true})
+
+	var tid trace.TraceID
+	copy(tid[:], []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
+	var sid trace.SpanID
+	copy(sid[:], []byte{1, 2, 3, 4, 5, 6, 7, 8})
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    tid,
+		SpanID:     sid,
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+
+	logger.WithTrace(ctx).Info("traced")
+
+	record := decodeLastJSONLine(t, buf.Bytes())
+	if got := record["trace_id"]; got != tid.String() {
+		t.Fatalf("expected trace_id %q, got %v", tid.String(), got)
+	}
+	if got := record["span_id"]; got != sid.String() {
+		t.Fatalf("expected span_id %q, got %v", sid.String(), got)
+	}
+}
+
+// --- helpers ---
+
+func decodeLastJSONLine(t *testing.T, data []byte) map[string]any {
+	t.Helper()
+	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
+	if len(lines) == 0 || len(lines[len(lines)-1]) == 0 {
+		t.Fatalf("expected at least one JSON line in %q", data)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(lines[len(lines)-1], &record); err != nil {
+		t.Fatalf("failed decoding json: %v", err)
+	}
+	return record
 }

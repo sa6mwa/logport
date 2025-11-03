@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+type testContextKey string
+
 func TestContextWithLoggerStoresAndRetrieves(t *testing.T) {
 	base := context.Background()
 	logger := noopLogger{}
@@ -24,7 +26,7 @@ func TestContextWithLoggerStoresAndRetrieves(t *testing.T) {
 }
 
 func TestContextWithLoggerNilLoggerReturnsOriginal(t *testing.T) {
-	base := context.WithValue(context.Background(), "key", 1)
+	base := context.WithValue(context.Background(), testContextKey("key"), 1)
 	ctx := ContextWithLogger(base, nil)
 
 	if ctx != base {
@@ -34,7 +36,8 @@ func TestContextWithLoggerNilLoggerReturnsOriginal(t *testing.T) {
 }
 
 func TestLoggerFromContextFallbacks(t *testing.T) {
-	if _, ok := LoggerFromContext(nil).(noopLogger); !ok {
+	var nilCtx context.Context
+	if _, ok := LoggerFromContext(nilCtx).(noopLogger); !ok {
 		t.Fatalf("expected noop logger when context is nil")
 	}
 

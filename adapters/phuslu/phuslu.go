@@ -7,20 +7,24 @@ import (
 	"log/slog"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	plog "github.com/phuslu/log"
-	port "pkt.systems/logport"
+	logport "pkt.systems/logport"
 )
 
+// Options configures the phuslu adapter prior to construction.
 type Options struct {
 	Configure func(*plog.Logger)
 }
 
-func New(w io.Writer) port.ForLogging {
+// New builds a phuslu-backed adapter with default configuration.
+func New(w io.Writer) logport.ForLogging {
 	return NewWithOptions(w, Options{})
 }
 
-func NewWithOptions(w io.Writer, opts Options) port.ForLogging {
+// NewWithOptions builds a phuslu-backed adapter using the supplied options.
+func NewWithOptions(w io.Writer, opts Options) logport.ForLogging {
 	logger := &plog.Logger{Level: plog.InfoLevel}
 	if w != nil {
 		logger.Writer = plog.IOWriter{Writer: w}
@@ -31,27 +35,29 @@ func NewWithOptions(w io.Writer, opts Options) port.ForLogging {
 	return adapter{logger: logger}
 }
 
-func NewFromLogger(logger *plog.Logger) port.ForLogging {
+// NewFromLogger wraps an existing phuslu logger with the logport adapter.
+func NewFromLogger(logger *plog.Logger) logport.ForLogging {
 	return adapter{logger: logger}
 }
 
+// ContextWithLogger stores a configured phuslu adapter inside the context.
 func ContextWithLogger(ctx context.Context, w io.Writer, opts Options) context.Context {
-	return port.ContextWithLogger(ctx, NewWithOptions(w, opts))
+	return logport.ContextWithLogger(ctx, NewWithOptions(w, opts))
 }
 
 type adapter struct {
 	logger          *plog.Logger
 	baseKeyvals     []any
 	groups          []string
-	forcedLevel     *port.Level
+	forcedLevel     *logport.Level
 	includeLogLevel bool
 }
 
-func (a adapter) LogLevel(level port.Level) port.ForLogging {
+func (a adapter) LogLevel(level logport.Level) logport.ForLogging {
 	if a.logger == nil {
 		return a
 	}
-	if level == port.NoLevel {
+	if level == logport.NoLevel {
 		lvl := level
 		return adapter{logger: a.logger, baseKeyvals: a.baseKeyvals, groups: a.groups, forcedLevel: &lvl, includeLogLevel: a.includeLogLevel}
 	}
@@ -60,14 +66,14 @@ func (a adapter) LogLevel(level port.Level) port.ForLogging {
 	return adapter{logger: &clone, baseKeyvals: a.baseKeyvals, groups: a.groups, includeLogLevel: a.includeLogLevel}
 }
 
-func (a adapter) LogLevelFromEnv(key string) port.ForLogging {
-	if level, ok := port.LevelFromEnv(key); ok {
+func (a adapter) LogLevelFromEnv(key string) logport.ForLogging {
+	if level, ok := logport.LevelFromEnv(key); ok {
 		return a.LogLevel(level)
 	}
 	return a
 }
 
-func (a adapter) WithLogLevel() port.ForLogging {
+func (a adapter) WithLogLevel() logport.ForLogging {
 	if a.includeLogLevel {
 		return a
 	}
@@ -75,28 +81,28 @@ func (a adapter) WithLogLevel() port.ForLogging {
 }
 
 func (a adapter) Log(_ context.Context, level slog.Level, msg string, keyvals ...any) {
-	a.Logp(port.LevelFromSlog(level), msg, keyvals...)
+	a.Logp(logport.LevelFromSlog(level), msg, keyvals...)
 }
 
-func (a adapter) Logp(level port.Level, msg string, keyvals ...any) {
+func (a adapter) Logp(level logport.Level, msg string, keyvals ...any) {
 	switch level {
-	case port.TraceLevel:
+	case logport.TraceLevel:
 		a.Trace(msg, keyvals...)
-	case port.DebugLevel:
+	case logport.DebugLevel:
 		a.Debug(msg, keyvals...)
-	case port.InfoLevel:
+	case logport.InfoLevel:
 		a.Info(msg, keyvals...)
-	case port.WarnLevel:
+	case logport.WarnLevel:
 		a.Warn(msg, keyvals...)
-	case port.ErrorLevel:
+	case logport.ErrorLevel:
 		a.Error(msg, keyvals...)
-	case port.FatalLevel:
+	case logport.FatalLevel:
 		a.Fatal(msg, keyvals...)
-	case port.PanicLevel:
+	case logport.PanicLevel:
 		a.Panic(msg, keyvals...)
-	case port.NoLevel:
+	case logport.NoLevel:
 		a.logNoLevel(msg, keyvals...)
-	case port.Disabled:
+	case logport.Disabled:
 		return
 	default:
 		a.Info(msg, keyvals...)
@@ -104,18 +110,18 @@ func (a adapter) Logp(level port.Level, msg string, keyvals ...any) {
 }
 
 func (a adapter) Logs(level string, msg string, keyvals ...any) {
-	if lvl, ok := port.ParseLevel(level); ok {
+	if lvl, ok := logport.ParseLevel(level); ok {
 		a.Logp(lvl, msg, keyvals...)
 		return
 	}
-	a.Logp(port.NoLevel, msg, keyvals...)
+	a.Logp(logport.NoLevel, msg, keyvals...)
 }
 
-func (a adapter) Logf(level port.Level, format string, args ...any) {
+func (a adapter) Logf(level logport.Level, format string, args ...any) {
 	a.Logp(level, formatMessage(format, args...))
 }
 
-func (a adapter) With(keyvals ...any) port.ForLogging {
+func (a adapter) With(keyvals ...any) logport.ForLogging {
 	if len(keyvals) == 0 {
 		return a
 	}
@@ -132,8 +138,8 @@ func (a adapter) With(keyvals ...any) port.ForLogging {
 	return adapter{logger: a.logger, baseKeyvals: base, groups: a.groups, forcedLevel: a.forcedLevel, includeLogLevel: a.includeLogLevel}
 }
 
-func (a adapter) WithTrace(ctx context.Context) port.ForLogging {
-	keyvals := port.TraceKeyvalsFromContext(ctx)
+func (a adapter) WithTrace(ctx context.Context) logport.ForLogging {
+	keyvals := logport.TraceKeyvalsFromContext(ctx)
 	if len(keyvals) == 0 {
 		return a
 	}
@@ -247,7 +253,7 @@ func (a adapter) Tracef(format string, args ...any) {
 }
 
 func (a adapter) Write(p []byte) (int, error) {
-	return port.WriteToLogger(a, p)
+	return logport.WriteToLogger(a, p)
 }
 
 func (a adapter) logEntry(entry *plog.Entry, msg string, keyvals []any) {
@@ -258,13 +264,115 @@ func (a adapter) logEntry(entry *plog.Entry, msg string, keyvals []any) {
 		entry.KeysAndValues(a.baseKeyvals...)
 	}
 	if len(keyvals) > 0 {
-		addition := normalizeKeyvals(keyvals, a.groups)
-		if len(addition) > 0 {
-			entry.KeysAndValues(addition...)
-		}
+		appendEntryFields(entry, keyvals, a.groups, 0)
 	}
 	a.appendLogLevel(entry)
 	entry.Msg(msg)
+}
+
+func appendEntryFields(entry *plog.Entry, keyvals []any, groups []string, argIndex int) int {
+	for i := 0; i < len(keyvals); {
+		switch v := keyvals[i].(type) {
+		case slog.Attr:
+			argIndex = appendAttrFields(entry, v, groups, argIndex)
+			i++
+		case []slog.Attr:
+			for _, attr := range v {
+				argIndex = appendAttrFields(entry, attr, groups, argIndex)
+			}
+			i++
+		default:
+			if i+1 >= len(keyvals) {
+				key := fmt.Sprintf("arg%d", argIndex)
+				if len(groups) > 0 {
+					key = joinAttrKey(groups, key)
+				}
+				writeEntryField(entry, key, v)
+				argIndex++
+				i++
+				continue
+			}
+			key := keyToString(v)
+			if len(groups) > 0 {
+				key = joinAttrKey(groups, key)
+			}
+			writeEntryField(entry, key, keyvals[i+1])
+			argIndex++
+			i += 2
+		}
+	}
+	return argIndex
+}
+
+func appendAttrFields(entry *plog.Entry, attr slog.Attr, groups []string, argIndex int) int {
+	attr.Value = attr.Value.Resolve()
+	if attr.Value.Kind() == slog.KindGroup {
+		subGroups := groups
+		if attr.Key != "" {
+			subGroups = appendGroup(groups, attr.Key)
+		}
+		for _, nested := range attr.Value.Group() {
+			argIndex = appendAttrFields(entry, nested, subGroups, argIndex)
+		}
+		return argIndex
+	}
+	key := joinAttrKey(groups, attr.Key)
+	writeEntryField(entry, key, attr.Value.Any())
+	return argIndex + 1
+}
+
+func writeEntryField(entry *plog.Entry, key string, value any) {
+	switch v := value.(type) {
+	case error:
+		entry.AnErr(key, v)
+	case time.Time:
+		entry.Time(key, v)
+	case time.Duration:
+		entry.Dur(key, v)
+	case fmt.Stringer:
+		entry.Stringer(key, v)
+	case bool:
+		entry.Bool(key, v)
+	case int:
+		entry.Int(key, v)
+	case int8:
+		entry.Int8(key, v)
+	case int16:
+		entry.Int16(key, v)
+	case int32:
+		entry.Int32(key, v)
+	case int64:
+		entry.Int64(key, v)
+	case uint:
+		entry.Uint(key, v)
+	case uint8:
+		entry.Uint8(key, v)
+	case uint16:
+		entry.Uint16(key, v)
+	case uint32:
+		entry.Uint32(key, v)
+	case uint64:
+		entry.Uint64(key, v)
+	case float32:
+		entry.Float32(key, v)
+	case float64:
+		entry.Float64(key, v)
+	case string:
+		entry.Str(key, v)
+	case []byte:
+		entry.Bytes(key, v)
+	case plog.ObjectMarshaler:
+		entry.Object(key, v)
+	default:
+		entry.Interface(key, v)
+	}
+}
+
+func keyToString(key any) string {
+	if s, ok := key.(string); ok {
+		return s
+	}
+	return fmt.Sprint(key)
 }
 
 func (a adapter) Enabled(_ context.Context, level slog.Level) bool {
@@ -463,58 +571,58 @@ func joinAttrKey(groups []string, key string) string {
 	return strings.Join(parts, ".")
 }
 
-func (a adapter) currentLevel() port.Level {
+func (a adapter) currentLevel() logport.Level {
 	if a.forcedLevel != nil {
 		return *a.forcedLevel
 	}
 	if a.logger == nil {
-		return port.InfoLevel
+		return logport.InfoLevel
 	}
 	current := plog.Level(atomic.LoadUint32((*uint32)(&a.logger.Level)))
 	return phusluLevelToPort(current)
 }
 
-func portLevelToPhuslu(level port.Level) plog.Level {
+func portLevelToPhuslu(level logport.Level) plog.Level {
 	switch level {
-	case port.TraceLevel, port.NoLevel:
+	case logport.TraceLevel, logport.NoLevel:
 		return plog.TraceLevel
-	case port.DebugLevel:
+	case logport.DebugLevel:
 		return plog.DebugLevel
-	case port.InfoLevel:
+	case logport.InfoLevel:
 		return plog.InfoLevel
-	case port.WarnLevel:
+	case logport.WarnLevel:
 		return plog.WarnLevel
-	case port.ErrorLevel:
+	case logport.ErrorLevel:
 		return plog.ErrorLevel
-	case port.FatalLevel:
+	case logport.FatalLevel:
 		return plog.FatalLevel
-	case port.PanicLevel:
+	case logport.PanicLevel:
 		return plog.PanicLevel
-	case port.Disabled:
+	case logport.Disabled:
 		return plog.PanicLevel + 1
 	default:
 		return plog.InfoLevel
 	}
 }
 
-func phusluLevelToPort(level plog.Level) port.Level {
+func phusluLevelToPort(level plog.Level) logport.Level {
 	switch level {
 	case plog.TraceLevel:
-		return port.TraceLevel
+		return logport.TraceLevel
 	case plog.DebugLevel:
-		return port.DebugLevel
+		return logport.DebugLevel
 	case plog.InfoLevel:
-		return port.InfoLevel
+		return logport.InfoLevel
 	case plog.WarnLevel:
-		return port.WarnLevel
+		return logport.WarnLevel
 	case plog.ErrorLevel:
-		return port.ErrorLevel
+		return logport.ErrorLevel
 	case plog.FatalLevel:
-		return port.FatalLevel
+		return logport.FatalLevel
 	case plog.PanicLevel:
-		return port.PanicLevel
+		return logport.PanicLevel
 	default:
-		return port.InfoLevel
+		return logport.InfoLevel
 	}
 }
 
@@ -522,10 +630,10 @@ func (a adapter) appendLogLevel(entry *plog.Entry) {
 	if entry == nil || !a.includeLogLevel {
 		return
 	}
-	entry.Str("loglevel", port.LevelString(a.currentLevel()))
+	entry.Str("loglevel", logport.LevelString(a.currentLevel()))
 }
 
-var _ port.ForLogging = adapter{}
+var _ logport.ForLogging = adapter{}
 
 func (a adapter) emit(msg string, keyvals []any, entryFactory func() *plog.Entry) {
 	entry := entryFactory()
@@ -533,7 +641,7 @@ func (a adapter) emit(msg string, keyvals []any, entryFactory func() *plog.Entry
 }
 
 func (a adapter) forceNoLevel() bool {
-	return a.logger != nil && a.forcedLevel != nil && *a.forcedLevel == port.NoLevel
+	return a.logger != nil && a.forcedLevel != nil && *a.forcedLevel == logport.NoLevel
 }
 
 func (a adapter) logNoLevel(msg string, keyvals ...any) {

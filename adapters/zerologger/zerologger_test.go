@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	port "pkt.systems/logport"
+	logport "pkt.systems/logport"
 )
 
 type customStringer struct{ value string }
@@ -192,7 +192,7 @@ func TestContextWithLoggerInjectsAdapter(t *testing.T) {
 	buf := &bytes.Buffer{}
 	ctx := ContextWithLogger(context.Background(), buf, Options{NoColor: true, DisableTimestamp: true})
 
-	logger := port.LoggerFromContext(ctx)
+	logger := logport.LoggerFromContext(ctx)
 	logger.Info("ctx message", "foo", "bar")
 
 	got := buf.String()
@@ -234,7 +234,7 @@ func TestZerologAdapterSupportsSlogHandler(t *testing.T) {
 func TestNoLevelOmitsLevelField(t *testing.T) {
 	buf := &bytes.Buffer{}
 	base := zerolog.New(buf)
-	logger := NewFromLogger(base).LogLevel(port.NoLevel)
+	logger := NewFromLogger(base).LogLevel(logport.NoLevel)
 	logger.Info("no level", "foo", "bar")
 
 	record := decodeZerologJSON(t, buf.Bytes())
@@ -275,7 +275,7 @@ func TestNoLevelOmitsLevelField(t *testing.T) {
 
 func TestNoLevelConsoleWriterShowsPlaceholder(t *testing.T) {
 	buf := &bytes.Buffer{}
-	logger := New(buf).LogLevel(port.NoLevel)
+	logger := New(buf).LogLevel(logport.NoLevel)
 	logger.Warn("console no level", "foo", "bar")
 
 	out := buf.String()
@@ -308,6 +308,47 @@ func TestDisableTimestampOmitsConsoleTimestamp(t *testing.T) {
 	}
 	if fields[0] != "INF" {
 		t.Fatalf("expected console line to start with level, got %q", fields[0])
+	}
+}
+
+func TestInfoAddsFields(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewStructured(buf)
+
+	logger.Info(
+		"kv",
+		"component", "worker",
+		"attempt", int64(2),
+		"cached", true,
+	)
+
+	record := decodeZerologJSON(t, buf.Bytes())
+	if record["component"] != "worker" {
+		t.Fatalf("expected component field, got %v", record["component"])
+	}
+	if record["attempt"] != float64(2) {
+		t.Fatalf("expected attempt=2, got %v", record["attempt"])
+	}
+	if record["cached"] != true {
+		t.Fatalf("expected cached=true, got %v", record["cached"])
+	}
+	if record["message"] != "kv" {
+		t.Fatalf("expected message 'kv', got %v", record["message"])
+	}
+}
+
+func TestWithLogLevelAddsLogLevelField(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := NewStructured(buf).LogLevel(logport.WarnLevel).WithLogLevel()
+
+	logger.Warn("preflight")
+
+	record := decodeZerologJSON(t, buf.Bytes())
+	if record["loglevel"] != "warn" {
+		t.Fatalf("expected loglevel field, got %v", record["loglevel"])
+	}
+	if record["message"] != "preflight" {
+		t.Fatalf("expected message 'preflight', got %v", record["message"])
 	}
 }
 

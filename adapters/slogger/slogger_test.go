@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	port "pkt.systems/logport"
+	logport "pkt.systems/logport"
 	"pkt.systems/logport/adapters/slogger"
 )
 
@@ -59,7 +59,7 @@ func TestSloggerJSONOutput(t *testing.T) {
 }
 
 func TestSloggerRespectsMinLevel(t *testing.T) {
-	min := port.WarnLevel
+	min := logport.WarnLevel
 	var buf bytes.Buffer
 	logger := slogger.NewWithOptions(&buf, slogger.Options{MinLevel: &min})
 

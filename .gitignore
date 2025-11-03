@@ -1,3 +1,5 @@
+/benchmark/benchorder
+/benchmark/cmd/benchorder/benchorder
 /.gocache
 /*.test
 coverage.out

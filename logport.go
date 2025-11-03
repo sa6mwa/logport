@@ -1,4 +1,4 @@
-// logport defines a minimal logging port that can be satisfied by multiple back
+// Package logport defines a minimal logging port that can be satisfied by multiple back
 // ends. The core ForLogging interface embeds slog.Handler so that adapters can
 // be used both as structured logging receivers and as drop-in slog handlers and
 // much more.
@@ -52,6 +52,7 @@ const (
 	NoLevel
 	// Disabled disables the logger.
 	Disabled
+	// TraceLevel defines trace log level.
 	TraceLevel Level = -1
 )
 
@@ -98,7 +99,7 @@ type ForLogging interface {
 	// context carries a valid OpenTelemetry span.
 	WithTrace(ctx context.Context) ForLogging
 
-	ForLoggingSubset
+	Subset
 
 	// Logp emits msg at the supplied logport level.
 	Logp(level Level, msg string, keyvals ...any)
@@ -123,11 +124,11 @@ type ForLogging interface {
 	Tracef(format string, v ...any)
 }
 
-// ForLoggingMinimalSubset defines the smallest set of convenience methods that
-// library authors can require when they want consumers to plug in their own
-// logger. Callers can satisfy this interface with a bespoke implementation or
-// by reusing a logport adapter.
-type ForLoggingMinimalSubset interface {
+// MinimalSubset defines the smallest set of convenience methods that library
+// authors can require when they want consumers to plug in their own logger.
+// Callers can satisfy this interface with a bespoke implementation or by
+// reusing a logport adapter.
+type MinimalSubset interface {
 	// Debug logs msg at DebugLevel.
 	Debug(msg string, keyvals ...any)
 	// Info logs msg at InfoLevel.
@@ -138,12 +139,12 @@ type ForLoggingMinimalSubset interface {
 	Error(msg string, keyvals ...any)
 }
 
-// ForLoggingSubset extends the minimal contract with additional helpers for
-// libraries that need trace, panic, fatal, or slog-compatible logging while
-// still allowing API users to bring their own logger or any adapter that
-// implements these methods.
-type ForLoggingSubset interface {
-	ForLoggingMinimalSubset
+// Subset extends the minimal contract with additional helpers for libraries
+// that need trace, panic, fatal, or slog-compatible logging while still
+// allowing API users to bring their own logger or any adapter that implements
+// these methods.
+type Subset interface {
+	MinimalSubset
 
 	// Trace logs msg at TraceLevel (below DebugLevel).
 	Trace(msg string, keyvals ...any)
@@ -160,6 +161,7 @@ type ForLoggingSubset interface {
 	Logs(level string, msg string, keyvals ...any)
 }
 
+// DTGTimeFormat is the default Date Time Group layout (DDHHMM) for console logging.
 var DTGTimeFormat string = "021504"
 
 type loggerContextKey struct{}

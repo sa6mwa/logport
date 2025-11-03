@@ -1,17 +1,16 @@
-module pkt.systems/logport
+module pkt.systems/logport/benchmark
 
 go 1.25.2
 
 require (
 	github.com/charmbracelet/log v0.4.2
 	github.com/francoispqt/onelog v0.0.0-20190306043706-8c2bb31b10a4
+	github.com/go-kit/log v0.2.1
+	github.com/go-logr/logr v1.4.3
 	github.com/phuslu/log v1.0.120
 	github.com/rs/zerolog v1.34.0
-	go.opentelemetry.io/otel/trace v1.38.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/sys v0.37.0
-	golang.org/x/term v0.36.0
-	pkt.systems/pslog v0.3.0
+	pkt.systems/logport v0.0.0
 )
 
 require (
@@ -33,6 +32,12 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect
+	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
+	golang.org/x/sys v0.37.0 // indirect
+	golang.org/x/term v0.36.0 // indirect
+	pkt.systems/pslog v0.3.0 // indirect
 )
+
+replace pkt.systems/logport => ../

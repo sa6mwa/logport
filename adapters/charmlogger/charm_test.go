@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/log"
-	port "pkt.systems/logport"
+	logport "pkt.systems/logport"
 )
 
 func TestNewLogsMessageWithFields(t *testing.T) {
@@ -73,7 +73,7 @@ func TestContextWithLoggerInjectsAdapter(t *testing.T) {
 	buf := &bytes.Buffer{}
 	ctx := ContextWithLogger(context.Background(), buf, log.Options{ReportTimestamp: false})
 
-	logger := port.LoggerFromContext(ctx)
+	logger := logport.LoggerFromContext(ctx)
 	logger.Info("from context")
 
 	got := buf.String()
@@ -110,7 +110,7 @@ func TestCharmAdapterSupportsSlogHandler(t *testing.T) {
 func TestCharmNoLevelRemovesSeverity(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := NewWithOptions(buf, log.Options{ReportTimestamp: false})
-	noLevel := logger.LogLevel(port.NoLevel)
+	noLevel := logger.LogLevel(logport.NoLevel)
 
 	noLevel.Info("no level", "foo", "bar")
 

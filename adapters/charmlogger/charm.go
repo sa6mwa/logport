@@ -10,15 +10,16 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
-	port "pkt.systems/logport"
+	logport "pkt.systems/logport"
 )
 
+// ErrLoggerRequired signals that a charm adapter is missing its underlying logger.
 var (
 	ErrLoggerRequired error = errors.New("logger is required")
 )
 
 // New constructs a logging adapter backed by charmbracelet/log.
-func New(w io.Writer) port.ForLogging {
+func New(w io.Writer) logport.ForLogging {
 	return charmAdapter{logger: log.NewWithOptions(w, log.Options{
 		TimeFormat:      time.RFC3339,
 		ReportTimestamp: true,
@@ -26,7 +27,7 @@ func New(w io.Writer) port.ForLogging {
 }
 
 // NewStructured returns a charm-backed logger that emits JSON instead of text.
-func NewStructured(w io.Writer) port.ForLogging {
+func NewStructured(w io.Writer) logport.ForLogging {
 	return charmAdapter{logger: log.NewWithOptions(w, log.Options{
 		TimeFormat:      time.RFC3339,
 		ReportTimestamp: true,
@@ -34,28 +35,28 @@ func NewStructured(w io.Writer) port.ForLogging {
 	})}
 }
 
-func NewWithOptions(w io.Writer, o log.Options) port.ForLogging {
+// NewWithOptions constructs a charm adapter using the supplied writer and options.
+func NewWithOptions(w io.Writer, o log.Options) logport.ForLogging {
 	return charmAdapter{logger: log.NewWithOptions(w, o)}
 }
 
-// Returns a new logger in a context, retrievable via
-// port.LoggerFromContext.
+// ContextWithLogger stores a charm adapter inside the provided context.
 func ContextWithLogger(ctx context.Context, w io.Writer, o log.Options) context.Context {
-	return port.ContextWithLogger(ctx, charmAdapter{logger: log.NewWithOptions(w, o)})
+	return logport.ContextWithLogger(ctx, charmAdapter{logger: log.NewWithOptions(w, o)})
 }
 
 type charmAdapter struct {
 	logger          *log.Logger
 	groups          []string
-	forcedLevel     *port.Level
+	forcedLevel     *logport.Level
 	includeLogLevel bool
 }
 
-func (c charmAdapter) LogLevel(level port.Level) port.ForLogging {
+func (c charmAdapter) LogLevel(level logport.Level) logport.ForLogging {
 	if c.logger == nil {
 		return c
 	}
-	if level == port.NoLevel {
+	if level == logport.NoLevel {
 		lvl := level
 		return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: &lvl, includeLogLevel: c.includeLogLevel}
 	}
@@ -64,14 +65,14 @@ func (c charmAdapter) LogLevel(level port.Level) port.ForLogging {
 	return charmAdapter{logger: clone, groups: c.groups, includeLogLevel: c.includeLogLevel}
 }
 
-func (c charmAdapter) LogLevelFromEnv(key string) port.ForLogging {
-	if level, ok := port.LevelFromEnv(key); ok {
+func (c charmAdapter) LogLevelFromEnv(key string) logport.ForLogging {
+	if level, ok := logport.LevelFromEnv(key); ok {
 		return c.LogLevel(level)
 	}
 	return c
 }
 
-func (c charmAdapter) WithLogLevel() port.ForLogging {
+func (c charmAdapter) WithLogLevel() logport.ForLogging {
 	if c.includeLogLevel {
 		return c
 	}
@@ -79,28 +80,28 @@ func (c charmAdapter) WithLogLevel() port.ForLogging {
 }
 
 func (c charmAdapter) Log(_ context.Context, level slog.Level, msg string, keyvals ...any) {
-	c.Logp(port.LevelFromSlog(level), msg, keyvals...)
+	c.Logp(logport.LevelFromSlog(level), msg, keyvals...)
 }
 
-func (c charmAdapter) Logp(level port.Level, msg string, keyvals ...any) {
+func (c charmAdapter) Logp(level logport.Level, msg string, keyvals ...any) {
 	switch level {
-	case port.TraceLevel:
+	case logport.TraceLevel:
 		c.Trace(msg, keyvals...)
-	case port.DebugLevel:
+	case logport.DebugLevel:
 		c.Debug(msg, keyvals...)
-	case port.InfoLevel:
+	case logport.InfoLevel:
 		c.Info(msg, keyvals...)
-	case port.WarnLevel:
+	case logport.WarnLevel:
 		c.Warn(msg, keyvals...)
-	case port.ErrorLevel:
+	case logport.ErrorLevel:
 		c.Error(msg, keyvals...)
-	case port.FatalLevel:
+	case logport.FatalLevel:
 		c.Fatal(msg, keyvals...)
-	case port.PanicLevel:
+	case logport.PanicLevel:
 		c.Panic(msg, keyvals...)
-	case port.NoLevel:
+	case logport.NoLevel:
 		c.logNoLevel(msg, keyvals...)
-	case port.Disabled:
+	case logport.Disabled:
 		return
 	default:
 		c.Info(msg, keyvals...)
@@ -108,28 +109,28 @@ func (c charmAdapter) Logp(level port.Level, msg string, keyvals ...any) {
 }
 
 func (c charmAdapter) Logs(level string, msg string, keyvals ...any) {
-	if lvl, ok := port.ParseLevel(level); ok {
+	if lvl, ok := logport.ParseLevel(level); ok {
 		c.Logp(lvl, msg, keyvals...)
 		return
 	}
-	c.Logp(port.NoLevel, msg, keyvals...)
+	c.Logp(logport.NoLevel, msg, keyvals...)
 }
 
-func (c charmAdapter) Logf(level port.Level, format string, args ...any) {
+func (c charmAdapter) Logf(level logport.Level, format string, args ...any) {
 	c.Logp(level, formatMessage(format, args...))
 }
 
-func (c charmAdapter) currentLevel() port.Level {
+func (c charmAdapter) currentLevel() logport.Level {
 	if c.forcedLevel != nil {
 		return *c.forcedLevel
 	}
 	if c.logger == nil {
-		return port.InfoLevel
+		return logport.InfoLevel
 	}
 	return charmLevelToPort(c.logger.GetLevel())
 }
 
-func (c charmAdapter) With(keyvals ...any) port.ForLogging {
+func (c charmAdapter) With(keyvals ...any) logport.ForLogging {
 	if c.logger == nil || len(keyvals) == 0 {
 		return charmAdapter{logger: c.logger, groups: c.groups, forcedLevel: c.forcedLevel, includeLogLevel: c.includeLogLevel}
 	}
@@ -140,8 +141,8 @@ func (c charmAdapter) With(keyvals ...any) port.ForLogging {
 	return charmAdapter{logger: c.logger.With(normalized...), groups: c.groups, forcedLevel: c.forcedLevel, includeLogLevel: c.includeLogLevel}
 }
 
-func (c charmAdapter) WithTrace(ctx context.Context) port.ForLogging {
-	keyvals := port.TraceKeyvalsFromContext(ctx)
+func (c charmAdapter) WithTrace(ctx context.Context) logport.ForLogging {
+	keyvals := logport.TraceKeyvalsFromContext(ctx)
 	if len(keyvals) == 0 {
 		return c
 	}
@@ -152,7 +153,7 @@ func (c charmAdapter) appendLogLevel(keyvals []any) []any {
 	if !c.includeLogLevel {
 		return keyvals
 	}
-	return append(keyvals, "loglevel", port.LevelString(c.currentLevel()))
+	return append(keyvals, "loglevel", logport.LevelString(c.currentLevel()))
 }
 
 func (c charmAdapter) Debug(msg string, keyvals ...any) {
@@ -262,7 +263,7 @@ func (c charmAdapter) Tracef(format string, args ...any) {
 }
 
 func (c charmAdapter) Write(p []byte) (int, error) {
-	return port.WriteToLogger(c, p)
+	return logport.WriteToLogger(c, p)
 }
 
 func (c charmAdapter) Enabled(_ context.Context, level slog.Level) bool {
@@ -281,7 +282,7 @@ func (c charmAdapter) Handle(_ context.Context, record slog.Record) error {
 	}
 	keyvals := recordToKeyvals(record, c.groups)
 	if c.includeLogLevel {
-		keyvals = append(keyvals, "loglevel", port.LevelString(c.currentLevel()))
+		keyvals = append(keyvals, "loglevel", logport.LevelString(c.currentLevel()))
 	}
 	if c.forceNoLevel() {
 		c.logger.Print(record.Message, keyvals...)
@@ -392,39 +393,39 @@ func joinAttrKey(groups []string, key string) string {
 	return strings.Join(parts, ".")
 }
 
-func portLevelToCharm(level port.Level) log.Level {
+func portLevelToCharm(level logport.Level) log.Level {
 	switch level {
-	case port.TraceLevel, port.DebugLevel, port.NoLevel:
+	case logport.TraceLevel, logport.DebugLevel, logport.NoLevel:
 		return log.DebugLevel
-	case port.InfoLevel:
+	case logport.InfoLevel:
 		return log.InfoLevel
-	case port.WarnLevel:
+	case logport.WarnLevel:
 		return log.WarnLevel
-	case port.ErrorLevel:
+	case logport.ErrorLevel:
 		return log.ErrorLevel
-	case port.FatalLevel, port.PanicLevel:
+	case logport.FatalLevel, logport.PanicLevel:
 		return log.FatalLevel
-	case port.Disabled:
+	case logport.Disabled:
 		return log.FatalLevel + 1
 	default:
 		return log.InfoLevel
 	}
 }
 
-func charmLevelToPort(level log.Level) port.Level {
+func charmLevelToPort(level log.Level) logport.Level {
 	switch level {
 	case log.DebugLevel:
-		return port.DebugLevel
+		return logport.DebugLevel
 	case log.InfoLevel:
-		return port.InfoLevel
+		return logport.InfoLevel
 	case log.WarnLevel:
-		return port.WarnLevel
+		return logport.WarnLevel
 	case log.ErrorLevel:
-		return port.ErrorLevel
+		return logport.ErrorLevel
 	case log.FatalLevel:
-		return port.FatalLevel
+		return logport.FatalLevel
 	default:
-		return port.InfoLevel
+		return logport.InfoLevel
 	}
 }
 
@@ -437,10 +438,10 @@ func (c charmAdapter) logNoLevel(msg string, keyvals ...any) {
 }
 
 func (c charmAdapter) forceNoLevel() bool {
-	return c.logger != nil && c.forcedLevel != nil && *c.forcedLevel == port.NoLevel
+	return c.logger != nil && c.forcedLevel != nil && *c.forcedLevel == logport.NoLevel
 }
 
-var _ port.ForLogging = charmAdapter{}
+var _ logport.ForLogging = charmAdapter{}
 
 func normalizeCharmKeyvals(keyvals []any, groups []string) []any {
 	if len(keyvals) == 0 {

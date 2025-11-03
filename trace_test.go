@@ -32,7 +32,8 @@ func TestTraceKeyvalsFromContextExtractsIDs(t *testing.T) {
 }
 
 func TestTraceKeyvalsFromContextNilOrInvalid(t *testing.T) {
-	if got := TraceKeyvalsFromContext(nil); len(got) != 0 {
+	var nilCtx context.Context
+	if got := TraceKeyvalsFromContext(nilCtx); len(got) != 0 {
 		t.Fatalf("expected nil context to return no keyvals, got %v", got)
 	}
 

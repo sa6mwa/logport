@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	plog "github.com/phuslu/log"
-	port "pkt.systems/logport"
+	logport "pkt.systems/logport"
 )
 
 func TestNewLogsMessageWithFields(t *testing.T) {
@@ -70,7 +70,7 @@ func TestContextWithLoggerInjectsAdapter(t *testing.T) {
 	buf := &bytes.Buffer{}
 	ctx := ContextWithLogger(context.Background(), buf, Options{})
 
-	logger := port.LoggerFromContext(ctx)
+	logger := logport.LoggerFromContext(ctx)
 	logger.Info("from context")
 
 	record := decodeLogLine(t, buf.Bytes())
@@ -116,7 +116,7 @@ func TestEnabledRespectsLoggerLevel(t *testing.T) {
 
 func TestNoLevelOmitsLevelField(t *testing.T) {
 	buf := &bytes.Buffer{}
-	logger := New(buf).LogLevel(port.NoLevel)
+	logger := New(buf).LogLevel(logport.NoLevel)
 	logger.Info("no level", "foo", "bar")
 
 	record := decodeLogLine(t, buf.Bytes())
@@ -138,6 +138,44 @@ func TestNoLevelOmitsLevelField(t *testing.T) {
 	}
 	if record["tenant"] != "acme" {
 		t.Fatalf("expected tenant field to persist, got %v", record["tenant"])
+	}
+}
+
+func TestInfoAddsFields(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := New(buf)
+
+	logger.Info(
+		"builder",
+		"component", "worker",
+		"attempt", int64(2),
+		"cached", true,
+	)
+
+	record := decodeLogLine(t, buf.Bytes())
+	if record["component"] != "worker" {
+		t.Fatalf("expected component field, got %v", record["component"])
+	}
+	if record["attempt"] != float64(2) {
+		t.Fatalf("expected attempt=2, got %v", record["attempt"])
+	}
+	if record["cached"] != true {
+		t.Fatalf("expected cached=true, got %v", record["cached"])
+	}
+}
+
+func TestWithLogLevelIncludesLogLevelField(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := New(buf).LogLevel(logport.ErrorLevel).WithLogLevel()
+
+	logger.Error("levelled")
+
+	record := decodeLogLine(t, buf.Bytes())
+	if record["loglevel"] != "error" {
+		t.Fatalf("expected loglevel=error, got %v", record["loglevel"])
+	}
+	if record["message"] != "levelled" {
+		t.Fatalf("expected message 'levelled', got %v", record["message"])
 	}
 }
 

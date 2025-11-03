@@ -9,7 +9,7 @@ import (
 	"time"
 
 	onelogpkg "github.com/francoispqt/onelog"
-	port "pkt.systems/logport"
+	logport "pkt.systems/logport"
 )
 
 func TestInfoProducesStructuredOutput(t *testing.T) {
@@ -31,8 +31,8 @@ func TestInfoProducesStructuredOutput(t *testing.T) {
 	if !ok || ts == "" {
 		t.Fatalf("expected timestamp field, got %v", record["ts"])
 	}
-	if _, err := time.Parse(port.DTGTimeFormat, ts); err != nil {
-		t.Fatalf("expected timestamp to follow %q, got %q: %v", port.DTGTimeFormat, ts, err)
+	if _, err := time.Parse(logport.DTGTimeFormat, ts); err != nil {
+		t.Fatalf("expected timestamp to follow %q, got %q: %v", logport.DTGTimeFormat, ts, err)
 	}
 }
 
@@ -58,7 +58,7 @@ func TestWithBaseFieldsAndGroups(t *testing.T) {
 
 func TestLogLevelFiltersMessages(t *testing.T) {
 	buf := &bytes.Buffer{}
-	logger := New(buf).LogLevel(port.WarnLevel)
+	logger := New(buf).LogLevel(logport.WarnLevel)
 
 	logger.Info("skip me")
 	if buf.Len() != 0 {
@@ -96,7 +96,7 @@ func TestSlogHandlerIntegration(t *testing.T) {
 
 func TestOptionsMinLevelAndHook(t *testing.T) {
 	buf := &bytes.Buffer{}
-	min := port.ErrorLevel
+	min := logport.ErrorLevel
 	logger := NewWithOptions(buf, Options{
 		MinLevel: &min,
 		Hook: func(e onelogpkg.Entry) {
@@ -160,7 +160,7 @@ func TestNewFromLoggerAndContext(t *testing.T) {
 	logger := NewFromLogger(underlying)
 
 	ctx := ContextWithLogger(context.Background(), buf, Options{})
-	port.LoggerFromContext(ctx).Info("from ctx")
+	logport.LoggerFromContext(ctx).Info("from ctx")
 
 	logger.Info("direct")
 
@@ -209,6 +209,44 @@ func TestPanicLogsBeforePanicking(t *testing.T) {
 	}()
 
 	logger.Panic("boom", "panic", true)
+}
+
+func TestInfoAddsFields(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := New(buf)
+
+	logger.Info(
+		"builder",
+		"service", "api",
+		"attempt", int64(1),
+		"cached", false,
+	)
+
+	record := decodeJSON(t, buf.Bytes())
+	if record["service"] != "api" {
+		t.Fatalf("expected service=api, got %v", record["service"])
+	}
+	if record["attempt"] != float64(1) {
+		t.Fatalf("expected attempt=1, got %v", record["attempt"])
+	}
+	if record["cached"] != false {
+		t.Fatalf("expected cached=false, got %v", record["cached"])
+	}
+}
+
+func TestWithPreservesBaseFields(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := New(buf).With("app", "logport")
+
+	logger.Debug("builder", "route", "/health")
+
+	record := decodeJSON(t, buf.Bytes())
+	if record["app"] != "logport" {
+		t.Fatalf("expected base field app=logport, got %v", record["app"])
+	}
+	if record["route"] != "/health" {
+		t.Fatalf("expected route field, got %v", record["route"])
+	}
 }
 
 func decodeJSON(t *testing.T, data []byte) map[string]any {

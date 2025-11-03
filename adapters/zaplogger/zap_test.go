@@ -9,7 +9,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	port "pkt.systems/logport"
+	logport "pkt.systems/logport"
 )
 
 func testOptions() Options {
@@ -83,7 +83,7 @@ func TestWithAddsPersistentFields(t *testing.T) {
 func TestContextWithLoggerInjectsAdapter(t *testing.T) {
 	buf := &bytes.Buffer{}
 	ctx := ContextWithLogger(context.Background(), buf, testOptions())
-	logger := port.LoggerFromContext(ctx)
+	logger := logport.LoggerFromContext(ctx)
 	logger.Info("from context")
 
 	got := buf.String()
